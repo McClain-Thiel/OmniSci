@@ -10703,6 +10703,17 @@ async def _relay_runner_stream(
                 None,
                 conversation_store,
             )
+        elif _session_status_cache.get(session_id) == "failed":
+            # The runner can recycle its transport immediately after a
+            # terminal response.failed + session.status:failed sequence.
+            # That disconnect is not a second task failure. Preserve the
+            # harness error (and its durable labels) instead of overwriting it
+            # with runner_disconnected, which otherwise renders two errors for
+            # one turn and hides the actionable watchdog/provider cause.
+            _logger.info(
+                "Relay: preserving terminal failure across runner transport loss for session=%s",
+                session_id,
+            )
         else:
             # Publish a failed status so the client's SSE stream sees a
             # clean error event instead of silent truncation (#1114).

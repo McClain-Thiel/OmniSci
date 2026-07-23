@@ -103,6 +103,12 @@ export interface ServerInfo {
    * (``OMNIGENT_SMART_ROUTING=1`` + ``llm:`` config). Hidden by default.
    */
   smart_routing_enabled: boolean;
+  /**
+   * True when the science workbench package is importable on the server
+   * (the ``/v1/science`` routes exist). Gates the Science tab in the right
+   * workspace rail. Fails closed: a failed probe hides the tab.
+   */
+  science_enabled: boolean;
 }
 
 /** Sentinel used when the probe fails — accounts is off, no login URL. */
@@ -121,6 +127,9 @@ const _OFF: ServerInfo = {
   public_sharing_enabled: true,
   server_version: null,
   smart_routing_enabled: false,
+  // Science fails CLOSED: a failed probe must hide the Science tab rather
+  // than render a panel whose endpoints don't exist.
+  science_enabled: false,
 };
 
 let _cached: ServerInfo | null = null;
@@ -161,6 +170,7 @@ export async function resolveServerInfo(): Promise<ServerInfo> {
           public_sharing_enabled: data.public_sharing_enabled !== false,
           server_version: typeof data.server_version === "string" ? data.server_version : null,
           smart_routing_enabled: data.smart_routing_enabled === true,
+          science_enabled: data.science_enabled === true,
         };
         return _cached;
       }

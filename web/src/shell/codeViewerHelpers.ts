@@ -89,6 +89,7 @@ const BINARY_EXTENSIONS = new Set([
   "pyc",
   "pyo",
   "pyd",
+  "parquet",
 ]);
 
 export function isBinaryPath(path: string): boolean {
@@ -142,6 +143,28 @@ export function isImageFile(path: string, contentType?: string | null): boolean 
 export function isPdfFile(path: string, contentType?: string | null): boolean {
   if (contentType) return contentType === "application/pdf";
   return path.split(".").pop()?.toLowerCase() === "pdf";
+}
+
+/**
+ * Return the delimiter for CSV/TSV tabular files, or null for other paths.
+ * These get a parsed table preview (see CsvTableViewer) with the Monaco
+ * source view as the escape hatch.
+ */
+export function csvDelimiterForPath(path: string): "," | "\t" | null {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "csv") return ",";
+  if (ext === "tsv") return "\t";
+  return null;
+}
+
+/** JSON files get a collapsible tree preview alongside the source view. */
+export function isJsonPath(path: string): boolean {
+  return path.split(".").pop()?.toLowerCase() === "json";
+}
+
+/** Small Parquet files are parsed locally in the browser. */
+export function isParquetPath(path: string): boolean {
+  return path.split(".").pop()?.toLowerCase() === "parquet";
 }
 
 export function detectLang(path: string): BundledLanguage | "text" {

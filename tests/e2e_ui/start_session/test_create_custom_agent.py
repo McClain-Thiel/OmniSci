@@ -1,13 +1,13 @@
-"""E2E: "Create custom agent" dialog on the new-session landing page.
+"""E2E: durable agent creation from the new-session landing page.
 
 Covers the user journey of creating a custom agent from the agent picker
-dropdown, configuring it (name, description, MCP tools), and submitting the
-form to create a session with the bundled agent.
+dropdown, inspecting the generated YAML, saving an app-level template, and
+starting a session with that template.
 
 Uses the same route-stubbing approach as ``test_start_session.py``: the
 server's ``/v1/hosts``, ``/v1/agents``, and ``POST /v1/sessions`` are faked
-so the tests don't need a real host. The create POST is intercepted to
-capture the multipart request body for assertion.
+so the tests don't need a real host. Agent-template and session creation are
+captured separately.
 """
 
 from __future__ import annotations
@@ -92,7 +92,7 @@ def _managed_info_body() -> str:
 
     ``managed_sandboxes_enabled: true`` + ``sandbox_provider: "lakebox"`` makes
     the picker offer (and default to) the "Databricks Sandbox" target, which is
-    the shape that gates the "Create custom agent" affordance.
+    the execution target while the app-level agent builder remains available.
     """
     return json.dumps(
         {
@@ -125,7 +125,24 @@ async def _register_routes(
         await route.fulfill(status=200, content_type="application/json", body=_hosts_body())
 
     async def handle_agents(route: Route) -> None:
-        await route.fulfill(status=200, content_type="application/json", body=_agents_body())
+        if route.request.method == "POST":
+            create_requests.append({"kind": "agent", "__multipart__": True})
+            await route.fulfill(
+                status=201,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "id": "ag_created_e2e",
+                        "name": "created-agent",
+                        "description": None,
+                        "harness": "claude-sdk",
+                        "builtin": False,
+                        "created_at": 123,
+                    }
+                ),
+            )
+        else:
+            await route.fulfill(status=200, content_type="application/json", body=_agents_body())
 
     async def handle_events(route: Route) -> None:
         await route.fulfill(
@@ -136,14 +153,7 @@ async def _register_routes(
 
     async def handle_sessions(route: Route) -> None:
         if route.request.method == "POST":
-            # Capture multipart or JSON create requests.
-            content_type = route.request.headers.get("content-type", "")
-            if "multipart" in content_type:
-                # For multipart, we can't easily parse the binary body in
-                # Playwright, so just record that a multipart POST happened.
-                create_requests.append({"__multipart__": True})
-            else:
-                create_requests.append(route.request.post_data_json)
+            create_requests.append({"kind": "session", **route.request.post_data_json})
             await route.fulfill(
                 status=200,
                 content_type="application/json",
@@ -183,7 +193,7 @@ async def _seed_workspace(page) -> None:
 def test_create_agent_dialog_opens_from_dropdown(
     seeded_session: tuple[str, str],
 ) -> None:
-    """The agent dropdown shows a "Create custom agent" item that opens the dialog."""
+    """The agent dropdown exposes the reusable agent builder."""
     base_url, session_id = seeded_session
     _run_in_fresh_loop(_drive_dialog_opens(base_url, session_id))
 
@@ -207,7 +217,7 @@ async def _drive_dialog_opens(base_url: str, session_id: str) -> None:
             # Open the agent dropdown.
             await page.get_by_test_id("new-chat-landing-agent-select").click()
 
-            # "Create custom agent" item should be visible.
+            # The app-level agent action should be visible.
             create_item = page.get_by_test_id("new-chat-landing-create-agent")
             await expect(create_item).to_be_visible()
 
@@ -221,15 +231,15 @@ async def _drive_dialog_opens(base_url: str, session_id: str) -> None:
             await expect(page.get_by_test_id("create-agent-description")).to_be_visible()
             await expect(page.get_by_test_id("create-agent-harness")).to_be_visible()
             await expect(page.get_by_test_id("create-agent-instructions")).to_be_visible()
-            await expect(page.get_by_test_id("create-agent-add-mcp")).to_be_visible()
+            await expect(page.get_by_test_id("create-agent-yaml-preview")).to_be_visible()
         finally:
             await browser.close()
 
 
-def test_create_agent_submits_multipart_bundle(
+def test_create_agent_persists_template_then_starts_json_session(
     seeded_session: tuple[str, str],
 ) -> None:
-    """Creating a custom agent and sending produces a multipart POST."""
+    """Saving persists a template; starting binds it by id."""
     base_url, session_id = seeded_session
     _run_in_fresh_loop(_drive_create_and_submit(base_url, session_id))
 
@@ -250,7 +260,7 @@ async def _drive_create_and_submit(base_url: str, session_id: str) -> None:
                 state="visible", timeout=30_000
             )
 
-            # Open dropdown → Create custom agent.
+            # Open dropdown → Create agent.
             await page.get_by_test_id("new-chat-landing-agent-select").click()
             await page.get_by_test_id("new-chat-landing-create-agent").click()
 
@@ -280,24 +290,23 @@ async def _drive_create_and_submit(base_url: str, session_id: str) -> None:
             await page.get_by_test_id("new-chat-landing-input").fill("hello world")
             await page.get_by_test_id("new-chat-landing-submit").click()
 
-            # The create POST should have been a multipart request (the bundle).
-            await _wait_until(lambda: len(create_requests) == 1)
-            assert create_requests[0].get("__multipart__") is True, (
-                f"Expected multipart POST, got: {create_requests[0]}"
-            )
+            await _wait_until(lambda: len(create_requests) == 2)
+            assert create_requests[0] == {"kind": "agent", "__multipart__": True}
+            assert create_requests[1]["kind"] == "session"
+            assert create_requests[1]["agent_id"] == "ag_created_e2e"
         finally:
             await browser.close()
 
 
-def test_create_agent_with_mcp_server(
+def test_agent_builder_updates_yaml_manifest(
     seeded_session: tuple[str, str],
 ) -> None:
-    """Adding an MCP server in the dialog includes it in the bundle."""
+    """The visual controls expose their exact portable YAML output."""
     base_url, session_id = seeded_session
-    _run_in_fresh_loop(_drive_mcp_server(base_url, session_id))
+    _run_in_fresh_loop(_drive_yaml_manifest(base_url, session_id))
 
 
-async def _drive_mcp_server(base_url: str, session_id: str) -> None:
+async def _drive_yaml_manifest(base_url: str, session_id: str) -> None:
     async with async_playwright() as pw:
         browser = await pw.chromium.launch()
         page = await browser.new_page()
@@ -313,42 +322,24 @@ async def _drive_mcp_server(base_url: str, session_id: str) -> None:
                 state="visible", timeout=30_000
             )
 
-            # Open dropdown → Create custom agent.
+            # Open dropdown → Create agent.
             await page.get_by_test_id("new-chat-landing-agent-select").click()
             await page.get_by_test_id("new-chat-landing-create-agent").click()
 
             dialog = page.get_by_test_id("create-agent-dialog")
             await expect(dialog).to_be_visible(timeout=5_000)
 
-            # Fill in agent name and model (both required).
-            await page.get_by_test_id("create-agent-name").fill("mcp-agent")
+            await page.get_by_test_id("create-agent-name").fill("review-agent")
             await page.get_by_test_id("create-agent-model").fill("claude-sonnet-4-20250514")
+            manifest = page.get_by_test_id("create-agent-yaml-preview")
+            await expect(manifest).to_contain_text("name: review-agent")
+            await expect(manifest).to_contain_text("model: claude-sonnet-4-20250514")
+            await expect(manifest).to_contain_text("web_search")
 
-            # Add an MCP server.
-            await page.get_by_test_id("create-agent-add-mcp").click()
-
-            # An MCP entry card should appear.
-            mcp_entry = page.get_by_test_id("create-agent-mcp-entry")
-            await expect(mcp_entry).to_be_visible()
-
-            # Fill in MCP server details (stdio transport is default).
-            await page.get_by_test_id("create-agent-mcp-name").fill("github")
-            await page.get_by_test_id("create-agent-mcp-command").fill("npx")
-            await page.get_by_test_id("create-agent-mcp-args").fill(
-                "-y @modelcontextprotocol/server-github"
-            )
-            await page.get_by_test_id("create-agent-mcp-env").fill("GITHUB_TOKEN=ghp_test123")
-
-            # Submit the dialog.
-            await page.get_by_test_id("create-agent-submit").click()
-            await expect(dialog).to_be_hidden(timeout=5_000)
-
-            # Submit session.
-            await page.get_by_test_id("new-chat-landing-input").fill("list repos")
-            await page.get_by_test_id("new-chat-landing-submit").click()
-
-            await _wait_until(lambda: len(create_requests) == 1)
-            assert create_requests[0].get("__multipart__") is True
+            await page.get_by_role("switch", name="Enable Web search").click()
+            await expect(manifest).not_to_contain_text("web_search")
+            await expect(manifest).to_contain_text("web_fetch")
+            assert create_requests == []
         finally:
             await browser.close()
 
@@ -377,7 +368,7 @@ async def _drive_cancel(base_url: str, session_id: str) -> None:
                 state="visible", timeout=30_000
             )
 
-            # Open dropdown → Create custom agent.
+            # Open dropdown → Create agent.
             await page.get_by_test_id("new-chat-landing-agent-select").click()
             await page.get_by_test_id("new-chat-landing-create-agent").click()
 
@@ -402,20 +393,15 @@ async def _drive_cancel(base_url: str, session_id: str) -> None:
             await browser.close()
 
 
-def test_create_agent_hidden_on_sandbox(
+def test_create_agent_available_on_sandbox(
     seeded_session: tuple[str, str],
 ) -> None:
-    """On a managed sandbox target, "Create custom agent" is hidden.
-
-    A sandbox provisions its runner from a baked image with no create path for
-    an uploaded bundle, so the affordance is omitted from the picker. Switching
-    to a connected host brings it back.
-    """
+    """App-level templates can be created before choosing an execution host."""
     base_url, session_id = seeded_session
-    _run_in_fresh_loop(_drive_hidden_on_sandbox(base_url, session_id))
+    _run_in_fresh_loop(_drive_available_on_sandbox(base_url, session_id))
 
 
-async def _drive_hidden_on_sandbox(base_url: str, session_id: str) -> None:
+async def _drive_available_on_sandbox(base_url: str, session_id: str) -> None:
     async with async_playwright() as pw:
         browser = await pw.chromium.launch()
         page = await browser.new_page()
@@ -440,17 +426,8 @@ async def _drive_hidden_on_sandbox(base_url: str, session_id: str) -> None:
                 "Databricks Sandbox"
             )
 
-            # On the sandbox, the create item is omitted from the picker.
-            await page.get_by_test_id("new-chat-landing-agent-select").click()
-            await expect(page.get_by_test_id("new-chat-landing-create-agent")).to_have_count(0)
-
-            # Switch to the connected host: the item reappears and opens.
-            await page.keyboard.press("Escape")
-            await page.get_by_test_id("new-chat-landing-host-chip").click()
-            await page.get_by_test_id(f"new-chat-landing-host-{_HOST_ID}").click()
-            await expect(page.get_by_test_id("new-chat-landing-host-chip")).not_to_contain_text(
-                "Databricks Sandbox"
-            )
+            # Template creation is app-level, so it remains available even
+            # when the current execution target is a managed sandbox.
             await page.get_by_test_id("new-chat-landing-agent-select").click()
             create_item = page.get_by_test_id("new-chat-landing-create-agent")
             await expect(create_item).to_be_visible()
@@ -460,20 +437,15 @@ async def _drive_hidden_on_sandbox(base_url: str, session_id: str) -> None:
             await browser.close()
 
 
-def test_pending_agent_dropped_when_switching_to_sandbox(
+def test_saved_agent_remains_selected_when_switching_to_sandbox(
     seeded_session: tuple[str, str],
 ) -> None:
-    """A pending custom agent picked on a host is dropped on switch to sandbox.
-
-    Creating a custom agent selects it as the pending pick. Since a pending
-    bundle can't run on a managed sandbox, switching the target to the sandbox
-    must fall the selection back to a real agent and drop the pending row.
-    """
+    """A durable app template remains selected across execution targets."""
     base_url, session_id = seeded_session
-    _run_in_fresh_loop(_drive_pending_dropped_on_sandbox(base_url, session_id))
+    _run_in_fresh_loop(_drive_saved_agent_on_sandbox(base_url, session_id))
 
 
-async def _drive_pending_dropped_on_sandbox(base_url: str, session_id: str) -> None:
+async def _drive_saved_agent_on_sandbox(base_url: str, session_id: str) -> None:
     async with async_playwright() as pw:
         browser = await pw.chromium.launch()
         page = await browser.new_page()
@@ -492,29 +464,31 @@ async def _drive_pending_dropped_on_sandbox(base_url: str, session_id: str) -> N
                 state="visible", timeout=30_000
             )
 
-            # Switch to the connected host, then create + submit a pending agent.
+            # Switch to the connected host, then persist a reusable template.
             await page.get_by_test_id("new-chat-landing-host-chip").click()
             await page.get_by_test_id(f"new-chat-landing-host-{_HOST_ID}").click()
             await page.get_by_test_id("new-chat-landing-agent-select").click()
             await page.get_by_test_id("new-chat-landing-create-agent").click()
             await expect(page.get_by_test_id("create-agent-dialog")).to_be_visible(timeout=5_000)
-            await page.get_by_test_id("create-agent-name").fill("pending-agent")
+            await page.get_by_test_id("create-agent-name").fill("saved-agent")
             await page.get_by_test_id("create-agent-model").fill("claude-sonnet-4-20250514")
             await page.get_by_test_id("create-agent-submit").click()
             await expect(page.get_by_test_id("new-chat-landing-agent-select")).to_contain_text(
-                "pending-agent"
+                "saved-agent"
             )
 
-            # Switch the target back to the sandbox: the pending pick is dropped.
+            # Changing execution substrate does not change the app-level agent.
             await page.get_by_test_id("new-chat-landing-host-chip").click()
             await page.get_by_test_id("new-chat-landing-sandbox-option").click()
             await expect(page.get_by_test_id("new-chat-landing-host-chip")).to_contain_text(
                 "Databricks Sandbox"
             )
-            await expect(page.get_by_test_id("new-chat-landing-agent-select")).not_to_contain_text(
-                "pending-agent"
+            await expect(page.get_by_test_id("new-chat-landing-agent-select")).to_contain_text(
+                "saved-agent"
             )
             await page.get_by_test_id("new-chat-landing-agent-select").click()
-            await expect(page.get_by_test_id("new-chat-landing-agent-pending")).to_have_count(0)
+            await expect(
+                page.get_by_test_id("new-chat-landing-agent-ag_created_e2e")
+            ).to_be_visible()
         finally:
             await browser.close()

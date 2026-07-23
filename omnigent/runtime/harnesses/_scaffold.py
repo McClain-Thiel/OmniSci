@@ -105,7 +105,7 @@ _POLICY_EVAL_TIMEOUT_S = 86400.0
 # Every non-heartbeat ``ctx.emit`` resets the deadline (see
 # ``_guarded_run_turn``), so a long-but-active turn is never killed.
 # Env var name kept for the ops knob; ``<= 0`` disables.
-_TURN_IDLE_TIMEOUT_S = float(os.environ.get("HARNESS_TURN_TIMEOUT_S", "240"))
+_TURN_IDLE_TIMEOUT_S = float(os.environ.get("HARNESS_TURN_TIMEOUT_S", "600"))
 
 # Absolute per-turn ceiling: a hard cap on TOTAL turn duration, backstop
 # to the idle watchdog above. The idle watchdog never trips a turn that

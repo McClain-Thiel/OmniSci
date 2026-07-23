@@ -6,11 +6,25 @@
 
 </div>
 
-OmniSci combines OmniGent's cross-harness agent runtime with a
-Claude Science-style research workflow. You can use Claude Code, Codex, Cursor,
-OpenCode, or another supported agent while keeping the surrounding scientific
-work—tasks, research logs, compute runs, artifacts, approvals, and reviewer
-issues—in one auditable workspace.
+<p align="center">
+  <img src="docs/images/omnisci-workspace.jpg" alt="OmniSci research workspace" width="100%">
+</p>
+
+OmniSci turns [OmniGent](https://github.com/omnigent-ai/omnigent) into a
+local-first research workbench. It combines OmniGent's cross-harness agent
+runtime with a Claude Science-style workflow: use Claude Code, Codex, Cursor,
+OpenCode, or another supported agent while keeping tasks, research logs,
+compute runs, artifacts, approvals, and reviewer issues in one auditable
+workspace.
+
+## What OmniSci adds
+
+| OmniGent provides | OmniSci adds |
+| --- | --- |
+| Conversations, harnesses, models, subagents, tools, sandboxes, and streaming | A folder-scoped scientific record shared across conversations |
+| General shell, file, browser, and MCP execution | Explicit managed runs with job status, logs, outputs, and cost provenance |
+| Files created by agents | Checksummed artifacts linked to tasks, runs, and research-log entries |
+| Synchronous approval and policy controls | Durable science approvals plus an asynchronous reviewer issue checklist |
 
 The important distinction is:
 
@@ -24,6 +38,10 @@ OmniSci does not introduce a new agent loop or route ordinary tool calls through
 a separate science runtime. The Science agent uses normal OmniGent tools and can
 dispatch a low-context reviewer asynchronously. That reviewer raises
 evidence-backed issues in a checklist without blocking the main conversation.
+
+<p align="center">
+  <img src="docs/images/omnisci-review-issues.jpg" alt="OmniSci reviewer issue checklist beside a research conversation" width="100%">
+</p>
 
 ## Workspace model
 
@@ -68,10 +86,18 @@ npm install
 npm test
 ```
 
-Start the application using the normal OmniGent development commands:
+Start the application in three terminals:
 
 ```bash
-make dev
+# Terminal 1
+uv run omnigent server
+
+# Terminal 2
+uv run omnigent host --server http://localhost:6767
+
+# Terminal 3
+cd web
+npm run dev
 ```
 
 The `science` CLI exposes the durable research records and managed job/storage
@@ -105,6 +131,10 @@ flowchart LR
 and provider adapters. It records and validates scientific state; it is not an
 agent runtime or general-purpose tool broker.
 
+<p align="center">
+  <img src="docs/images/omnisci-provenance.jpg" alt="OmniSci provenance service settings" width="100%">
+</p>
+
 See [the concise product requirements](docs/OMNISCI_PRD.md) for the intended
 behavior and [the fork delta](FORK_DELTA.md) for changes relative to
 [OmniGent](https://github.com/omnigent-ai/omnigent).
@@ -119,4 +149,3 @@ system as a substitute for domain, safety, clinical, or regulatory review.
 ## License
 
 Apache-2.0. OmniSci preserves OmniGent's license and attribution.
-# OmniSci

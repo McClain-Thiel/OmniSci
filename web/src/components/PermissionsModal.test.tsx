@@ -67,6 +67,7 @@ function serverInfo(overrides: Partial<ServerInfo> = {}): ServerInfo {
     public_sharing_enabled: true,
     server_version: null,
     smart_routing_enabled: false,
+    science_enabled: false,
     ...overrides,
   };
 }
@@ -491,7 +492,7 @@ describe("PermissionsModal", () => {
       });
 
       expect(
-        await screen.findByText("Sharing has been disabled for this Omnigent server."),
+        await screen.findByText("Sharing has been disabled for this OmniSci server."),
       ).toBeInTheDocument();
       // Off short-circuits before the grant-list query and hides all controls.
       expect(listMock).not.toHaveBeenCalled();
@@ -512,7 +513,7 @@ describe("PermissionsModal", () => {
         screen.getByText("Invite others to view or collaborate on this session."),
       ).toBeInTheDocument();
       expect(
-        screen.queryByText("Sharing has been disabled for this Omnigent server."),
+        screen.queryByText("Sharing has been disabled for this OmniSci server."),
       ).not.toBeInTheDocument();
     });
 

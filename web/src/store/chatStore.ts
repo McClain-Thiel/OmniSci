@@ -4221,7 +4221,24 @@ export function handleSessionEvent(event: StreamEvent): void {
           };
         }
         if (event.status === "idle" || event.status === "failed") {
-          if (event.responseId !== undefined && s.activeResponse?.responseId === event.responseId) {
+          if (event.status === "failed" && s.activeResponse?.state === "streaming") {
+            // A failed session status is terminal even when the runner cannot
+            // attach a response id (startup failures and tunnel teardown are
+            // the common cases). Waiting for response_end here can strand the
+            // composer in "streaming" after a transport loss, forcing a page
+            // reload before the next turn. Unlike a bare idle tick, failed
+            // cannot be transient mid-turn, so it is safe to settle the active
+            // response immediately.
+            patch.status = "idle";
+            patch.activeResponse = {
+              ...s.activeResponse,
+              state: "failed",
+              error: event.error?.message ?? null,
+            };
+          } else if (
+            event.responseId !== undefined &&
+            s.activeResponse?.responseId === event.responseId
+          ) {
             patch.status = "idle";
             if (s.activeResponse.state !== "cancelled") {
               patch.activeResponse = {

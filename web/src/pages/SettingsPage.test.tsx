@@ -7,6 +7,7 @@ import { type ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Conversation } from "@/hooks/useConversations";
 import type { ElectronUpdateBridge, UpdateConfig, UpdateStatus } from "@/lib/nativeBridge";
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   // single_user: explicit single-user marker; false for accounts/OIDC/
   // multi-user-header. Gates the settings-route single-user redirect.
   singleUser: false,
+  scienceEnabled: true,
   // Identity from the mode-agnostic `/v1/me` probe (resolveIdentity returns
   // the id, getCurrentIsAdmin the flag). null → unauthenticated.
   me: { id: "alice", is_admin: false } as { id: string; is_admin: boolean } | null,
@@ -35,6 +37,22 @@ const mocks = vi.hoisted(() => ({
   projectNames: [] as string[],
   hasNextPage: false,
   fetchNextPage: vi.fn(),
+  agents: [] as Array<{
+    id: string;
+    name: string;
+    display_name: string;
+    description: string | null;
+    harness: string | null;
+    skills: { name: string; description: string }[];
+    builtin?: boolean;
+  }>,
+  hosts: [] as Array<{
+    host_id: string;
+    name: string;
+    owner: string;
+    status: "online" | "offline";
+    configured_harnesses?: Record<string, boolean | string> | null;
+  }>,
 }));
 
 vi.mock("next-themes", () => ({
@@ -46,6 +64,7 @@ vi.mock("@/lib/CapabilitiesContext", () => ({
     accounts_enabled: mocks.accountsEnabled,
     login_url: mocks.loginUrl,
     single_user: mocks.singleUser,
+    science_enabled: mocks.scienceEnabled,
   }),
 }));
 vi.mock("@/lib/accountsApi", () => ({
@@ -97,6 +116,26 @@ vi.mock("@/hooks/useConversations", async () => {
     useStopAndDeleteConversation: () => ({ mutate: mocks.deleteMutate, isPending: false }),
   };
 });
+vi.mock("@/hooks/useAvailableAgents", () => ({
+  useAvailableAgents: () => ({ data: mocks.agents, isLoading: false, error: null }),
+}));
+vi.mock("@/hooks/useHosts", () => ({
+  useHosts: () => ({ data: mocks.hosts, isLoading: false, error: null }),
+}));
+vi.mock("@/lib/agentLabels", () => ({
+  BRAIN_HARNESS_LABELS: {
+    "claude-sdk": "Claude SDK",
+    codex: "Codex",
+    cursor: "Cursor",
+    pi: "Pi",
+  },
+  useBrainHarnessLabels: () => ({
+    "claude-sdk": "Claude SDK",
+    codex: "Codex",
+    cursor: "Cursor",
+    pi: "Pi",
+  }),
+}));
 // Radix Select uses a portal + pointer events jsdom can't drive; stub it to a
 // native <select> so tests can drive both the color-theme dropdown and the
 // archived project filter. The real page puts data-testid on SelectTrigger,
@@ -165,12 +204,17 @@ function conv(id: string, partial: Partial<Conversation> = {}): Conversation {
 }
 
 function renderPage(path = "/settings") {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <TooltipProvider>
-      <MemoryRouter initialEntries={[path]}>
-        <SettingsPage />
-      </MemoryRouter>
-    </TooltipProvider>,
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <MemoryRouter initialEntries={[path]}>
+          <SettingsPage />
+        </MemoryRouter>
+      </TooltipProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -182,11 +226,14 @@ beforeEach(() => {
   mocks.theme = "system";
   mocks.accountsEnabled = true;
   mocks.loginUrl = "/login";
+  mocks.scienceEnabled = true;
   mocks.me = { id: "alice", is_admin: false };
   mocks.conversations = [];
   mocks.pages = undefined;
   mocks.projectNames = [];
   mocks.hasNextPage = false;
+  mocks.agents = [];
+  mocks.hosts = [];
   delete (window as unknown as Record<string, unknown>).omnigentDesktop;
 });
 afterEach(() => {
@@ -245,6 +292,66 @@ function installUpdateBridge(config: UpdateConfig = DEFAULT_UPDATE_CONFIG) {
 }
 
 describe("SettingsPage", () => {
+  it("configures the built-in Science agent and its portable runtime", () => {
+    localStorage.setItem("omnigent:last-agent-id", "ag_other");
+    mocks.agents = [
+      {
+        id: "ag_science",
+        name: "science",
+        display_name: "Science",
+        description: "General science agent",
+        harness: "codex",
+        skills: [
+          { name: "biology", description: "Biology specialist" },
+          { name: "chemistry", description: "Chemistry specialist" },
+        ],
+        builtin: true,
+      },
+    ];
+    mocks.hosts = [
+      {
+        host_id: "host_1",
+        name: "lab-laptop",
+        owner: "alice",
+        status: "online",
+        configured_harnesses: {
+          codex: "needs-auth",
+          "claude-sdk": true,
+          cursor: true,
+        },
+      },
+    ];
+
+    renderPage("/settings/agents");
+
+    expect(screen.getByTestId("settings-science-agent")).toHaveTextContent("Default research team");
+    expect(screen.getByText("/biology")).toBeInTheDocument();
+    expect(screen.getByText("/chemistry")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-science-agent")).toHaveTextContent("Cursor");
+    expect(screen.getByTestId("settings-science-agent")).toHaveTextContent("Ready");
+
+    fireEvent.change(screen.getByTestId("settings-science-runtime"), {
+      target: { value: "claude-sdk" },
+    });
+    expect(localStorage.getItem("omnigent:last-harness-by-agent")).toBe(
+      JSON.stringify({ ag_science: "claude-sdk" }),
+    );
+
+    fireEvent.click(screen.getByTestId("settings-science-make-default"));
+    expect(localStorage.getItem("omnigent:last-agent-id")).toBe("ag_science");
+  });
+
+  it("explains automatic provenance workspace binding", () => {
+    renderPage("/settings/research");
+
+    expect(screen.getByRole("heading", { name: "Provenance" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Provenance service available")).toBeInTheDocument();
+    expect(screen.getByText("Automatic workspace binding")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("/absolute/path/to/research-project")).toBeNull();
+    expect(screen.getByText("01 / Plan")).toBeInTheDocument();
+    expect(screen.getByText("04 / Preserve")).toBeInTheDocument();
+  });
+
   it("renders the Appearance section and applies a theme on card click", () => {
     renderPage("/settings/appearance");
     expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
@@ -291,12 +398,12 @@ describe("SettingsPage", () => {
     expect(screen.getByTestId("terminal-theme-auto")).toHaveAttribute("aria-checked", "false");
   });
 
-  it("renders the color theme dropdown, defaults to Omnigent, and applies a palette on change", () => {
+  it("renders the color theme dropdown, defaults to OmniSci, and applies a palette on change", () => {
     localStorage.clear();
     renderPage("/settings/appearance");
 
     const select = screen.getByTestId("color-theme-select") as HTMLSelectElement;
-    // Nothing stored → the default (Omnigent) palette is selected and no
+    // Nothing stored → the default (OmniSci) palette is selected and no
     // data-theme override is applied to the document.
     expect(select.value).toBe("omni");
     expect(document.documentElement.getAttribute("data-theme")).toBeNull();
@@ -562,18 +669,18 @@ describe("SettingsPage", () => {
     expect(localStorage.getItem("omnigent:code-font-family")).toBeNull();
   });
 
-  it("defaults bare /settings to Account when a login session exists, else Appearance", async () => {
+  it("defaults bare /settings to Account when a login session exists, else Provenance", async () => {
     // Login session (accounts OR OIDC) → Account leads, so /settings lands on it.
     renderPage("/settings");
     await waitFor(() => expect(screen.getByText("alice")).toBeInTheDocument());
 
     // Header single-user (no login_url) → no Account section; falls back to
-    // Appearance.
+    // Research.
     cleanup();
     mocks.accountsEnabled = false;
     mocks.loginUrl = null;
     renderPage("/settings");
-    expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Provenance" })).toBeInTheDocument();
   });
 
   it("renders the Account section at /settings/account for any login session", async () => {

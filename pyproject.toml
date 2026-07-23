@@ -133,7 +133,7 @@ vertex = ["google-auth>=2.0,<3"]
 # Modal sandbox launcher (`omnigent sandbox --provider modal`). The
 # launcher module ships in the base package and imports the SDK lazily,
 # so only users of the provider need this extra.
-modal = ["modal>=1.0,<2"]
+modal = ["modal>=1.4,<2"]
 # Daytona sandbox launcher (`omnigent sandbox --provider daytona` and
 # server-managed `sandbox.provider: daytona`).
 # Same lazy-import posture as the modal extra. Pre-1.0 SDK: pin minor.
@@ -308,6 +308,18 @@ dev = [
 # `omni` ship, internal and OSS alike.)
 omnigent = "omnigent.cli:main"
 omni = "omnigent.cli:main"
+science = "omnisci.cli.main:main"
+science-mcp = "omnisci.mcp_server:main"
+
+[project.entry-points."omnigent_science.compute"]
+local = "omnisci.compute.local:LocalComputeProvider"
+modal = "omnisci.compute.modal:ModalComputeProvider"
+qsub = "omnisci.compute.scheduler:QsubComputeProvider"
+slurm = "omnisci.compute.scheduler:SlurmComputeProvider"
+ssh = "omnisci.compute.ssh:SshComputeProvider"
+
+[project.entry-points."omnigent_science.storage"]
+s3 = "omnisci.storage.s3:S3StorageProvider"
 
 # uv path-deps for the sibling SDK packages (renamed in Stage 3).
 [tool.uv.sources]
@@ -321,15 +333,16 @@ omnigent-slack = { path = "integrations/slack", editable = true }
 include-package-data = true
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = [".", "science"]
 # Discovers the `omnigent` package (including `omnigent.inner.*` and
-# all omnigent subpackages absorbed during unification).
-include = ["omnigent*"]
+# all omnigent subpackages absorbed during unification) plus the isolated
+# science project service bundled by this fork.
+include = ["omnigent*", "omnisci*"]
 
 [tool.setuptools.package-data]
 "omnigent.db" = ["alembic.ini"]
 "omnigent.db.migrations" = ["script.py.mako"]
-"omnigent.resources.examples" = ["*.yaml", "*.sh", "debby/**/*", "polly/**/*"]
+"omnigent.resources.examples" = ["*.yaml", "*.sh", "debby/**/*", "polly/**/*", "science/**/*"]
 "omnigent.resources.pi_native" = ["*.js"]
 "omnigent.resources.scripts" = ["*.sh"]
 # include UI assets in build, plus the static API-only landing page served
@@ -368,7 +381,7 @@ timeout_method = "thread"
 # with ``ModuleNotFoundError: No module named 'omnigent_client'``
 # unless the SDKs are installed editable into the venv. Listing
 # both relative paths here keeps the test suite self-contained.
-pythonpath = [".", "sdks/python-client", "sdks/ui"]
+pythonpath = [".", "science", "sdks/python-client", "sdks/ui"]
 markers = [
     "live: end-to-end tests requiring real LLM API key (run with --llm-api-key)",
     "live_app: end-to-end tests requiring a deployed Databricks App server",

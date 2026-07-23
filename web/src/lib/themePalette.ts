@@ -72,8 +72,8 @@ export interface PaletteMeta {
 export const PALETTES: readonly PaletteMeta[] = [
   {
     id: "omni",
-    label: "Omnigent",
-    blurb: "The signature pink brand look.",
+    label: "OmniSci",
+    blurb: "The signature OmniSci pink brand look.",
     light: {
       bg: "#fdf7fb",
       card: "#ffffff",

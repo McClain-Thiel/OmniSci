@@ -1014,6 +1014,21 @@ def _claude_internal_write_files() -> list[pathlib.Path]:
     return [path for path in candidates if path.exists()]
 
 
+def _claude_sandbox_has_portable_auth() -> bool:
+    """Whether Claude auth can cross a macOS seatbelt boundary."""
+
+    if (pathlib.Path.home() / ".claude" / ".credentials.json").exists():
+        return True
+    return any(
+        os.environ.get(name)
+        for name in (
+            "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+        )
+    )
+
+
 def _resolve_sandbox_cwd(spec_cwd: str | None) -> pathlib.Path:
     """Resolve the sandbox root, rooting relative paths at the session
     working folder rather than the runner daemon's process cwd.
@@ -1089,6 +1104,18 @@ def prepare_claude_cli_path(
     if not sandbox.allow_network:
         # The Claude CLI itself must reach the provider, so we cannot run the
         # whole native-tool process tree inside a network-denying sandbox.
+        return PreparedClaudeCli(cli_path=real_cli_path, enable_native_tools=False)
+    if sandbox.backend_type == "darwin_seatbelt" and not _claude_sandbox_has_portable_auth():
+        # Claude subscription OAuth lives in the macOS Keychain. Granting a
+        # model-controlled process Keychain access would expose unrelated
+        # secrets, so keep the CLI supervisor unwrapped and native tools off;
+        # the independently sandboxed sys_os_* tools remain available.
+        logger.warning(
+            "Claude CLI auth is stored in the macOS Keychain, which is not "
+            "exposed to the agent sandbox. Running the CLI unwrapped with "
+            "native tools disabled; workspace access remains available "
+            "through sandboxed sys_os_* tools."
+        )
         return PreparedClaudeCli(cli_path=real_cli_path, enable_native_tools=False)
 
     sandbox = with_additional_read_roots(sandbox, _claude_internal_write_roots())

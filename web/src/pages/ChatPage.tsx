@@ -947,7 +947,7 @@ export function ChatPage() {
   // background tabs signal parent activity without duplicating child-session
   // badges from the sidebar/Agents rail. An open-but-untitled session
   // (no synthesized title yet) reads as "New session" to match its
-  // sidebar row; the landing page (no active session) stays "Omnigent".
+  // sidebar row; the landing page (no active session) stays "OmniSci".
   // Sub-agent (child) sessions are absent from the sidebar list, so
   // ``activeConv`` is null and the title would otherwise read "New session";
   // name the tab after the sub-agent instead, mirroring the header.
@@ -956,7 +956,7 @@ export function ChatPage() {
       ? (boundAgentBySession?.name ?? boundAgentName ?? subAgentLabel ?? null)
       : null;
   useEffect(() => {
-    const fallback = urlConvId ? UNTITLED_CONVERSATION_LABEL : "Omnigent";
+    const fallback = urlConvId ? UNTITLED_CONVERSATION_LABEL : "OmniSci";
     const base = truncateTitle(activeConv?.title ?? subAgentTabTitle ?? fallback);
     document.title = showsWorking ? `● ${base}` : base;
   }, [activeConv?.title, subAgentTabTitle, showsWorking, urlConvId]);
@@ -1715,12 +1715,12 @@ function MainAgentSurface({
                 <ConversationEmptyState>
                   <div className="space-y-1.5">
                     <h3 className="text-2xl font-medium tracking-[-0.02em]">
-                      What should we work on?
+                      What should we examine next?
                     </h3>
                     <p className="text-muted-foreground text-base">
                       {agentsError
                         ? `Failed to load agents: ${agentsError instanceof Error ? agentsError.message : String(agentsError)}`
-                        : "Send a message to get started."}
+                        : "Continue with analysis, computation, evidence review, or writing."}
                     </p>
                   </div>
                 </ConversationEmptyState>

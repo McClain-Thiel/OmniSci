@@ -384,7 +384,7 @@ export function OttoEyes({ className }: { className?: string }) {
       // The hero mascot is meaningful (not decorative), so OttoIcon's
       // decorative aria-hidden default is overridden with image semantics.
       role="img"
-      aria-label="Omnigent"
+      aria-label="OmniSci mascot"
       aria-hidden={false}
     />
   );

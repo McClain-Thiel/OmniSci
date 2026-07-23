@@ -12,6 +12,7 @@ import pytest_asyncio
 
 from omnigent.db.utils import builtin_agent_id, generate_agent_id
 from omnigent.stores.agent_store.sqlalchemy_store import SqlAlchemyAgentStore
+from tests.server.helpers import build_agent_bundle
 
 
 @pytest_asyncio.fixture()
@@ -87,3 +88,19 @@ async def test_builtin_flag_distinguishes_seeded_from_registered(
     by_id = {a["id"]: a for a in resp.json()["data"]}
     assert by_id[seeded_id]["builtin"] is True
     assert by_id[registered_id]["builtin"] is False
+
+
+async def test_create_template_agent_duplicate_name_returns_conflict(
+    client: httpx.AsyncClient,
+) -> None:
+    bundle = build_agent_bundle(
+        name="stable-name",
+        executor={"type": "omnigent", "config": {"harness": "claude-sdk"}},
+    )
+    files = {"bundle": ("agent.tar.gz", bundle, "application/gzip")}
+
+    first = await client.post("/v1/agents", files=files)
+    second = await client.post("/v1/agents", files=files)
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 409, second.text

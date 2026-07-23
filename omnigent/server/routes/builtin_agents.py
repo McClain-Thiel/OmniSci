@@ -1,4 +1,4 @@
-"""Read-only route for discovering built-in agents (``GET /v1/agents``).
+"""Routes for discovering and registering durable template agents.
 
 Built-in agents are the long-lived, shared agents the server provides
 out of the box — the seeded ``claude-native-ui`` agent plus anything
@@ -13,24 +13,33 @@ built-ins, then creates a session with
 ``POST /v1/sessions {agent_id, host_id, workspace}``. See
 ``designs/BUILTIN_AGENTS.md``.
 
-This is the read-only successor to the removed ``GET /api/agents`` list:
-there is intentionally no create/update/delete — agent writes happen
-through session creation.
+``POST /v1/agents`` is intentionally limited to explicit single-user local
+runtimes. Browser-created templates are operator-authored in that deployment
+shape and may use the same environment-reference expansion as ``--agent``.
+Multi-user ownership and credential delegation need a separate data model;
+accepting these uploads there would let one tenant reference server secrets.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
+from sqlalchemy.exc import IntegrityError
 
-from omnigent.db.utils import builtin_agent_id
+from omnigent.db.utils import builtin_agent_id, generate_agent_id
 from omnigent.entities import Agent
+from omnigent.errors import ErrorCode, OmnigentError
 from omnigent.runtime.agent_cache import AgentCache
-from omnigent.server.auth import AuthProvider
+from omnigent.server.auth import AuthProvider, local_single_user_enabled
+from omnigent.server.bundles import bundle_location, validate_agent_bundle
 from omnigent.server.routes._auth_helpers import require_user as _require_user
+from omnigent.server.routes._origin import require_trusted_origin
 from omnigent.server.schemas import AgentObject, MCPServerSummary, PaginatedList, SkillSummary
 from omnigent.stores import AgentStore
+from omnigent.stores.artifact_store import ArtifactStore
 
 _logger = logging.getLogger(__name__)
 
@@ -120,10 +129,11 @@ def _to_agent_object(agent: Agent, agent_cache: AgentCache) -> AgentObject:
 def create_builtin_agents_router(
     agent_store: AgentStore,
     agent_cache: AgentCache,
+    artifact_store: ArtifactStore | None = None,
     *,
     auth_provider: AuthProvider | None = None,
 ) -> APIRouter:
-    """Build the router for ``GET /v1/agents`` (built-in discovery).
+    """Build the router for app-level template agent discovery and creation.
 
     Mounted with ``prefix="/v1"`` so the final path is ``/v1/agents``.
 
@@ -133,9 +143,67 @@ def create_builtin_agents_router(
         ``mcp_servers`` on each agent).
     :param auth_provider: Optional auth provider; when set, the caller
         must be authenticated.
-    :returns: A FastAPI router exposing the read-only list.
+    :returns: A FastAPI router exposing template creation and discovery.
     """
     router = APIRouter()
+
+    @router.post(
+        "/agents",
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(require_trusted_origin)],
+    )
+    async def create_template_agent(
+        request: Request,
+        bundle: Annotated[UploadFile, File(...)],
+    ) -> AgentObject:
+        """Validate and register one reusable app-level agent template."""
+        _require_user(request, auth_provider)
+        if not local_single_user_enabled():
+            raise OmnigentError(
+                "Creating app-level agents in the UI is currently limited to "
+                "single-user local OmniSci runtimes.",
+                code=ErrorCode.FORBIDDEN,
+            )
+        if artifact_store is None:
+            raise OmnigentError(
+                "Agent bundle storage is not configured",
+                code=ErrorCode.INTERNAL_ERROR,
+            )
+
+        bundle_bytes = await bundle.read()
+        spec = await asyncio.to_thread(
+            validate_agent_bundle,
+            bundle_bytes,
+            enforce_handler_allowlist=False,
+        )
+        assert spec.name is not None
+        if await asyncio.to_thread(agent_store.get_by_name, spec.name) is not None:
+            raise OmnigentError(
+                f"An app-level agent named {spec.name!r} already exists.",
+                code=ErrorCode.CONFLICT,
+            )
+
+        agent_id = generate_agent_id()
+        location = bundle_location(agent_id, bundle_bytes)
+        await asyncio.to_thread(artifact_store.put, location, bundle_bytes)
+        try:
+            agent = await asyncio.to_thread(
+                agent_store.create,
+                agent_id,
+                spec.name,
+                location,
+                spec.description,
+            )
+        except IntegrityError as exc:
+            await asyncio.to_thread(artifact_store.delete, location)
+            raise OmnigentError(
+                f"An app-level agent named {spec.name!r} already exists.",
+                code=ErrorCode.CONFLICT,
+            ) from exc
+        except Exception:
+            await asyncio.to_thread(artifact_store.delete, location)
+            raise
+        return _to_agent_object(agent, agent_cache)
 
     @router.get("/agents")
     async def list_builtin_agents(

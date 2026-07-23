@@ -10,8 +10,12 @@ import { useEffect } from "react";
 import {
   ArchiveIcon,
   ArrowLeftIcon,
+  BotIcon,
+  CpuIcon,
   DownloadIcon,
+  FlaskConicalIcon,
   GitBranchIcon,
+  HardDriveIcon,
   KeyboardIcon,
   PaletteIcon,
   PanelRightOpenIcon,
@@ -20,6 +24,7 @@ import {
   TerminalIcon,
   UserCogIcon,
   UsersIcon,
+  WrenchIcon,
 } from "lucide-react";
 import { Link, useLocation } from "@/lib/routing";
 import { Button } from "@/components/ui/button";
@@ -31,6 +36,11 @@ import { isElectronShell } from "@/lib/nativeBridge";
 import { cn } from "@/lib/utils";
 
 export type SettingsSectionId =
+  | "research"
+  | "agents"
+  | "compute"
+  | "storage"
+  | "tools"
   | "appearance"
   | "git"
   | "shortcuts"
@@ -43,6 +53,11 @@ export type SettingsSectionId =
   | "updates";
 
 const SECTION_IDS: readonly SettingsSectionId[] = [
+  "research",
+  "agents",
+  "compute",
+  "storage",
+  "tools",
   "appearance",
   "git",
   "shortcuts",
@@ -94,6 +109,16 @@ export function settingsNavGroups(
     general.unshift({ id: "account", label: "Account", icon: UserCogIcon });
   }
   const groups: SettingsNavGroup[] = [];
+  groups.push({
+    title: "Research infrastructure",
+    items: [
+      { id: "research", label: "Provenance", icon: FlaskConicalIcon },
+      { id: "agents", label: "Agents", icon: BotIcon },
+      { id: "compute", label: "Compute", icon: CpuIcon },
+      { id: "storage", label: "Storage", icon: HardDriveIcon },
+      { id: "tools", label: "Tools & connections", icon: WrenchIcon },
+    ],
+  });
   // Desktop (Local CLI) leads when present — it's the shell-specific section a
   // desktop user is most likely here to change.
   if (isDesktop) {
@@ -135,7 +160,7 @@ export function settingsNavGroups(
  * Parse the active route into a settings descriptor. `inSettings` gates the
  * sidebar body swap; `section` drives the content. Bare `/settings` (no
  * section segment) defaults to Account when accounts auth is on — the most
- * relevant landing there — and Appearance otherwise. Basename-agnostic —
+ * relevant landing there — and Research otherwise. Basename-agnostic —
  * matches the `settings` segment wherever it lands, same approach as the
  * sidebar's top-level nav detection.
  */
@@ -146,7 +171,7 @@ export function useSettingsRoute(): { inSettings: boolean; section: SettingsSect
   // and the bare-/settings default landing on it — follows that, not
   // accounts specifically.
   const hasAuthSession = info !== "loading" && info.login_url !== null;
-  const defaultSection: SettingsSectionId = hasAuthSession ? "account" : "appearance";
+  const defaultSection: SettingsSectionId = hasAuthSession ? "account" : "research";
 
   const segments = useLocation().pathname.split("/").filter(Boolean);
   const idx = segments.lastIndexOf("settings");
@@ -166,7 +191,7 @@ export function useSettingsRoute(): { inSettings: boolean; section: SettingsSect
 }
 
 // Last location the user was on before entering /settings — path + search so
-// the conversation (and its ?file= etc.) is preserved. "Back to Omnigent"
+// the conversation (and its ?file= etc.) is preserved. "Back to OmniSci"
 // returns here instead of the home page. Module-scoped: the sidebar stays
 // mounted across the settings transition, so the value captured on the last
 // non-settings render survives into settings.
@@ -189,7 +214,7 @@ export function useTrackSettingsReturn(): void {
 /**
  * Settings nav rendered INSIDE the sidebar card (replacing the conversation
  * list on /settings). Keeps the card chrome — a top row with "Back to
- * Omnigent" and the same collapse control the conversations view uses.
+ * OmniSci" and the same collapse control the conversations view uses.
  */
 export function SettingsSidebarBody({
   onNavClick,
@@ -226,7 +251,7 @@ export function SettingsSidebarBody({
           (persistent card), so dropping it changes nothing there. */}
           <Link to={settingsReturnPath}>
             <ArrowLeftIcon className="size-4" />
-            Back to Omnigent
+            Back to OmniSci
           </Link>
         </Button>
         <Tooltip>

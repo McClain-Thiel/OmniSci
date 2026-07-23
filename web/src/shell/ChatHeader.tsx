@@ -3,6 +3,7 @@ import {
   ChevronLeftIcon,
   EllipsisVerticalIcon,
   FileIcon,
+  FlaskConicalIcon,
   InfoIcon,
   ListIcon,
   ListTodoIcon,
@@ -50,6 +51,8 @@ interface MobileSessionMenuProps {
   shellsPanelOpen: boolean;
   /** True while the mobile tasks drawer is open. */
   todosPanelOpen: boolean;
+  /** True while the mobile science drawer is open. */
+  sciencePanelOpen: boolean;
   /** Hide the Shells entry (claude-native sub-agents only). */
   hideTerminalsTab: boolean;
   /** Whether the Shells entry is available. */
@@ -62,6 +65,8 @@ interface MobileSessionMenuProps {
   todosCompleted: number;
   /** Total todo count (Tasks entry badge denominator + visibility). */
   todosTotal: number;
+  /** Whether the Science entry is available. */
+  showScienceTab: boolean;
   /** Debug mode — surfaces the Logs entry. */
   debugMode: boolean;
   /** Changed-file count (Files entry badge). */
@@ -81,6 +86,8 @@ interface MobileSessionMenuProps {
   onOpenSubagents: () => void;
   /** Open the mobile tasks drawer. */
   onOpenTodos: () => void;
+  /** Open the mobile science drawer. */
+  onOpenScience: () => void;
   /** Open the main execution-log push panel. */
   onOpenMainExecutionLog: () => void;
 }
@@ -380,7 +387,7 @@ export function ChatHeader({
         {/* Mobile-only FAB → dropdown of rail entries. Each entry opens
             the matching rail tab's content as a full-screen drawer,
             mirroring the desktop rail's tab strip (Files · Agents ·
-            Shells · Tasks). Hidden when a push panel is
+            Shells · Tasks · Science). Hidden when a push panel is
             already taking up the right side, and suppressed entirely
             when there's nothing to show.
             In terminal-first sessions, `panelOpen` is true when the
@@ -395,6 +402,7 @@ export function ChatHeader({
           !mobileMenu.subagentsPanelOpen &&
           !mobileMenu.shellsPanelOpen &&
           !mobileMenu.todosPanelOpen &&
+          !mobileMenu.sciencePanelOpen &&
           (hasRailContent || mobileMenu.debugMode) && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -478,6 +486,15 @@ export function ChatHeader({
                     <span className={cn(TAB_BADGE_BASE, "ml-auto bg-muted text-muted-foreground")}>
                       {mobileMenu.todosCompleted}/{mobileMenu.todosTotal}
                     </span>
+                  </DropdownMenuItem>
+                )}
+                {mobileMenu.showScienceTab && (
+                  <DropdownMenuItem
+                    onSelect={mobileMenu.onOpenScience}
+                    className="gap-2.5 px-2.5 py-2 text-base"
+                  >
+                    <FlaskConicalIcon className="size-4" />
+                    Provenance
                   </DropdownMenuItem>
                 )}
                 {mobileMenu.debugMode && (

@@ -29,6 +29,11 @@ vi.mock("@/components/BrowserPane/BrowserPane", () => ({
     <div data-testid="browser-pane-stub">{conversationId}</div>
   ),
 }));
+vi.mock("@/components/science/SciencePanel", () => ({
+  SciencePanel: ({ conversationId }: { conversationId: string }) => (
+    <div data-testid="science-panel-stub">{conversationId}</div>
+  ),
+}));
 
 afterEach(() => {
   cleanup();
@@ -46,6 +51,7 @@ function renderWorkspace(
     selectedFilePath?: string | null;
     openFiles?: string[];
     showBrowserTab?: boolean;
+    showScienceTab?: boolean;
   } = {},
 ) {
   const openFileViewer = vi.fn();
@@ -54,12 +60,14 @@ function renderWorkspace(
   render(
     <WorkspacePanel
       conversationId="conv_ws"
+      projectDir="/tmp/conv-ws"
       width={360}
       handleProps={{ tabIndex: 0 }}
       rightRailTab={overrides.rightRailTab ?? "files"}
       onRightRailTabChange={onRightRailTabChange}
       showFilesPanel
       showBrowserTab={overrides.showBrowserTab ?? false}
+      showScienceTab={overrides.showScienceTab ?? false}
       changedCount={0}
       showShellsTab={false}
       terminalsLength={0}
@@ -203,6 +211,23 @@ describe("WorkspacePanel browser tab", () => {
     // The content slot swaps to the embedded browser pane (stubbed here).
     expect(screen.getByTestId("browser-pane-stub")).toBeInTheDocument();
     // And the file scope views are not mounted in that branch.
+    expect(screen.queryByTestId("files-panel-stub")).toBeNull();
+  });
+});
+
+describe("WorkspacePanel science tab", () => {
+  it("renders only when the server capability enables it", () => {
+    renderWorkspace({ showScienceTab: true });
+    expect(screen.getByRole("tab", { name: /provenance/i })).toBeInTheDocument();
+
+    cleanup();
+    renderWorkspace({ showScienceTab: false });
+    expect(screen.queryByRole("tab", { name: /provenance/i })).toBeNull();
+  });
+
+  it("mounts the science panel when selected", () => {
+    renderWorkspace({ showScienceTab: true, rightRailTab: "science" });
+    expect(screen.getByTestId("science-panel-stub")).toHaveTextContent("conv_ws");
     expect(screen.queryByTestId("files-panel-stub")).toBeNull();
   });
 });

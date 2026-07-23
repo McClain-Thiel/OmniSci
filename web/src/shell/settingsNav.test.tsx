@@ -1,7 +1,7 @@
 // Tests for the Settings nav model + sidebar body (settingsNav).
 //
 // Covers the mobile-specific behavior: keyboard shortcuts is hidden on mobile
-// (max-md:hidden), and "Back to Omnigent" does NOT close the sidebar overlay
+// (max-md:hidden), and "Back to OmniSci" does NOT close the sidebar overlay
 // on a plain tap (no onNavClick) so mobile lands back on the conversation list
 // instead of the homepage. Section links still close it.
 
@@ -75,6 +75,18 @@ describe("settingsNavGroups", () => {
     }
   });
 
+  it("puts project infrastructure in its own leading group", () => {
+    const groups = settingsNavGroups(false, false);
+    expect(groups[0]?.title).toBe("Research infrastructure");
+    expect(groups[0]?.items.map((item) => item.id)).toEqual([
+      "research",
+      "agents",
+      "compute",
+      "storage",
+      "tools",
+    ]);
+  });
+
   it("includes Account (leading) whenever a login session exists (accounts OR OIDC)", () => {
     // First arg is hasAuthSession (login_url != null), not accounts-specific.
     // Header single-user (no session) → no Account section.
@@ -88,7 +100,8 @@ describe("settingsNavGroups", () => {
       .flatMap((g) => g.items)
       .map((i) => i.id);
     expect(withAccount).toContain("account");
-    expect(withAccount[0]).toBe("account");
+    const general = settingsNavGroups(true, false).find((group) => group.title === "General");
+    expect(general?.items[0]?.id).toBe("account");
   });
 
   it("includes the Local CLI section only in the desktop shell", () => {
@@ -139,16 +152,16 @@ describe("SettingsSidebarBody", () => {
     expect(screen.getByTestId("settings-nav-archived").className).not.toContain("max-md:hidden");
   });
 
-  it("does NOT close the sidebar when 'Back to Omnigent' is tapped", () => {
+  it("does NOT close the sidebar when 'Back to OmniSci' is tapped", () => {
     // No onNavClick on the back link: on mobile the overlay stays open so the
     // sidebar swaps back to the conversation list rather than closing onto the
     // homepage behind it.
     const { onNavClick } = renderBody();
-    fireEvent.click(screen.getByRole("link", { name: /Back to Omnigent/ }));
+    fireEvent.click(screen.getByRole("link", { name: /Back to OmniSci/ }));
     expect(onNavClick).not.toHaveBeenCalled();
   });
 
-  it("'Back to Omnigent' returns to the conversation the user came from", () => {
+  it("'Back to OmniSci' returns to the conversation the user came from", () => {
     // Simulate the real flow: the sidebar (which stays mounted) tracks the
     // pre-settings location, then the user enters /settings. Back must point at
     // the conversation, not the home page.
@@ -173,7 +186,7 @@ describe("SettingsSidebarBody", () => {
       </TooltipProvider>,
     );
     fireEvent.click(screen.getByText("go-settings"));
-    expect(screen.getByRole("link", { name: /Back to Omnigent/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Back to OmniSci/ })).toHaveAttribute(
       "href",
       "/c/conv_123?file=foo.ts",
     );
@@ -280,12 +293,12 @@ describe("useSettingsRoute", () => {
   it("redirects a direct /settings/members or /settings/sharing to the default section in single-user mode", () => {
     // Explicit single-user local runtime (single_user marker): Members and
     // Sharing are hidden, so a direct hit to either falls back to the default
-    // section (Appearance). Policies stays valid — it's functional single-user.
+    // section (Research). Policies stays valid — it's functional single-user.
     mocks.accountsEnabled = false;
     mocks.loginUrl = null;
     mocks.singleUser = true;
-    expect(routeHook("/settings/members")).toEqual({ inSettings: true, section: "appearance" });
-    expect(routeHook("/settings/sharing")).toEqual({ inSettings: true, section: "appearance" });
+    expect(routeHook("/settings/members")).toEqual({ inSettings: true, section: "research" });
+    expect(routeHook("/settings/sharing")).toEqual({ inSettings: true, section: "research" });
     expect(routeHook("/settings/policies")).toEqual({ inSettings: true, section: "policies" });
   });
 
@@ -305,9 +318,9 @@ describe("useSettingsRoute", () => {
       inSettings: true,
       section: "updates",
     });
-    // Bare /settings: in-settings, defaulting to Appearance in header mode
+    // Bare /settings: in-settings, defaulting to Research in header mode
     // (no login session — loginUrl null per beforeEach).
-    expect(routeHook("/settings")).toEqual({ inSettings: true, section: "appearance" });
+    expect(routeHook("/settings")).toEqual({ inSettings: true, section: "research" });
     // A non-settings route is out of settings.
     expect(routeHook("/inbox").inSettings).toBe(false);
   });

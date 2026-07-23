@@ -3235,6 +3235,34 @@ describe("chatStore — handleSessionEvent (session.* events)", () => {
       expect(state.sessionStatus).toBe("running");
     });
 
+    it("failed without a responseId settles the active turn so the composer recovers", () => {
+      useChatStore.setState({
+        status: "streaming",
+        sessionStatus: "running",
+        activeResponse: { responseId: "resp_wedged", state: "streaming", error: null },
+      });
+
+      handleSessionEvent({
+        type: "session_status",
+        conversationId: "conv_abc",
+        status: "failed",
+        error: {
+          code: "runner_disconnected",
+          message: "Runner disconnected unexpectedly.",
+        },
+      });
+
+      expect(useChatStore.getState()).toMatchObject({
+        status: "idle",
+        sessionStatus: "failed",
+        activeResponse: {
+          responseId: "resp_wedged",
+          state: "failed",
+          error: "Runner disconnected unexpectedly.",
+        },
+      });
+    });
+
     it("idle refetches the parent's child list when the conversation is a child", () => {
       // The child's cached snapshot identifies its parent; a finished turn
       // must refetch the parent's child list so the rail row's preview is

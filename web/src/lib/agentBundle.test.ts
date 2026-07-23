@@ -1,16 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-// We can't use buildAgentBundle directly in jsdom because
-// CompressionStream is not available. Instead, test the YAML
-// generation logic by importing the module and calling the
-// internal config builder. Since it's not exported, we test
-// indirectly through buildAgentBundle and inspect the generated
-// YAML by mocking the compression + tar layer.
-
-// The module's functions are all private except buildAgentBundle.
-// We mock CompressionStream and verify the config.yaml content
-// that gets fed to the tar/gzip pipeline.
-
 import type { AgentBundleInput } from "./agentBundle";
 
 // Capture what buildAgentBundle passes to `new File(...)` by
@@ -40,8 +29,8 @@ class PassthroughStream {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).CompressionStream = PassthroughStream;
 
-// Now import the function (it will use our mock CompressionStream).
-const { buildAgentBundle } = await import("./agentBundle");
+// Import after installing the stream mock used by buildAgentBundle.
+const { buildAgentBundle, buildAgentYaml } = await import("./agentBundle");
 
 /** Extract the config.yaml from the raw tar bytes inside the File. */
 async function extractConfigYaml(file: File): Promise<string> {
@@ -49,7 +38,7 @@ async function extractConfigYaml(file: File): Promise<string> {
   const tar = new Uint8Array(buf);
   // First tar entry: 512-byte header, then content.
   // File size is at offset 124, 12 bytes, octal null-terminated.
-  const sizeStr = new TextDecoder().decode(tar.slice(124, 135)).replace(/\0/g, "");
+  const sizeStr = new TextDecoder().decode(tar.slice(124, 135)).replaceAll("\0", "");
   const size = parseInt(sizeStr, 8);
   return new TextDecoder().decode(tar.slice(512, 512 + size));
 }
@@ -58,23 +47,83 @@ async function extractConfigYaml(file: File): Promise<string> {
 async function extractAgentsMd(file: File): Promise<string | null> {
   const buf = await file.arrayBuffer();
   const tar = new Uint8Array(buf);
-  const size0Str = new TextDecoder().decode(tar.slice(124, 135)).replace(/\0/g, "");
+  const size0Str = new TextDecoder().decode(tar.slice(124, 135)).replaceAll("\0", "");
   const size0 = parseInt(size0Str, 8);
   const blocks0 = Math.ceil(size0 / 512);
   const entry1Start = 512 + blocks0 * 512;
   if (entry1Start + 512 > tar.length) return null;
   const name1 = new TextDecoder()
     .decode(tar.slice(entry1Start, entry1Start + 100))
-    .replace(/\0/g, "");
+    .replaceAll("\0", "");
   if (!name1.startsWith("AGENTS.md")) return null;
   const size1Str = new TextDecoder()
     .decode(tar.slice(entry1Start + 124, entry1Start + 135))
-    .replace(/\0/g, "");
+    .replaceAll("\0", "");
   const size1 = parseInt(size1Str, 8);
   return new TextDecoder().decode(tar.slice(entry1Start + 512, entry1Start + 512 + size1));
 }
 
 describe("buildAgentBundle", () => {
+  it("renders the built-in capability selection in the preview", () => {
+    const yaml = buildAgentYaml({
+      name: "focused-agent",
+      harness: "claude-sdk",
+      model: "claude-sonnet-4-20250514",
+      builtins: ["web_fetch"],
+    });
+
+    expect(yaml).toContain("    - web_fetch");
+    expect(yaml).not.toContain("web_search");
+  });
+
+  it("omits the model so a template can follow the selected harness default", () => {
+    const yaml = buildAgentYaml({
+      name: "portable-scientist",
+      harness: "codex",
+    });
+
+    expect(yaml).toContain("harness: codex");
+    expect(yaml).not.toContain("model:");
+  });
+
+  it("grants workspace and host CLI access when selected", () => {
+    const yaml = buildAgentYaml({
+      name: "workspace-scientist",
+      harness: "claude-sdk",
+      workspaceAccess: true,
+    });
+
+    expect(yaml).toContain("os_env:\n  type: caller_process\n  cwd: .");
+    expect(yaml).not.toContain("write_paths:");
+  });
+
+  it("grants scoped research authoring without making raw data writable", () => {
+    const yaml = buildAgentYaml({
+      name: "workspace-scientist",
+      harness: "claude-sdk",
+      workspaceMode: "write",
+    });
+
+    expect(yaml).toContain("    write_paths:");
+    expect(yaml).toContain("      - analyses");
+    expect(yaml).toContain("      - results");
+    expect(yaml).toContain("      - figures");
+    expect(yaml).toContain("      - .science");
+    expect(yaml).not.toContain("      - data");
+    expect(yaml).toContain("    cwd_allow_hidden:");
+    expect(yaml).toContain("      - .science");
+  });
+
+  it("omits OS access when workspace tools are disabled", () => {
+    const yaml = buildAgentYaml({
+      name: "web-only-scientist",
+      harness: "claude-sdk",
+      workspaceAccess: false,
+    });
+
+    expect(yaml).not.toContain("os_env:");
+  });
+
   it("produces a tar.gz file with correct config.yaml for minimal input", async () => {
     const input: AgentBundleInput = {
       name: "test-agent",
@@ -143,7 +192,7 @@ describe("buildAgentBundle", () => {
     expect(md).toBeNull();
   });
 
-  it("includes inline MCP servers (stdio)", async () => {
+  it("preserves inline MCP servers from imported legacy bundles (stdio)", async () => {
     const input: AgentBundleInput = {
       name: "mcp-agent",
       harness: "claude-sdk",
@@ -166,7 +215,7 @@ describe("buildAgentBundle", () => {
     expect(yaml).toContain("      GITHUB_TOKEN: ghp_test");
   });
 
-  it("includes inline MCP servers (http)", async () => {
+  it("preserves inline MCP servers from imported legacy bundles (http)", async () => {
     const input: AgentBundleInput = {
       name: "http-agent",
       harness: "claude-sdk",

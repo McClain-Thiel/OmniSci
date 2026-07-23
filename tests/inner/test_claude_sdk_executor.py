@@ -2765,14 +2765,15 @@ def test_resolve_sandbox_cwd_roots_relative_at_runner_workspace(monkeypatch) -> 
     monkeypatch.setenv("OMNIGENT_RUNNER_WORKSPACE", "/home/bobby/code/agents")
     monkeypatch.chdir("/tmp")
 
-    assert str(_resolve_sandbox_cwd(".")) == "/home/bobby/code/agents"
-    assert str(_resolve_sandbox_cwd(None)) == "/home/bobby/code/agents"
-    assert str(_resolve_sandbox_cwd("src")) == "/home/bobby/code/agents/src"
-    assert str(_resolve_sandbox_cwd("/etc/foo")) == "/etc/foo"
+    workspace = Path("/home/bobby/code/agents").resolve()
+    assert _resolve_sandbox_cwd(".") == workspace
+    assert _resolve_sandbox_cwd(None) == workspace
+    assert _resolve_sandbox_cwd("src") == workspace / "src"
+    assert _resolve_sandbox_cwd("/etc/foo") == Path("/etc/foo").resolve()
 
     # No workspace set → falls back to the process cwd (prior behavior).
     monkeypatch.delenv("OMNIGENT_RUNNER_WORKSPACE", raising=False)
-    assert str(_resolve_sandbox_cwd(".")) == "/tmp"
+    assert _resolve_sandbox_cwd(".") == Path("/tmp").resolve()
 
 
 @pytest.mark.parametrize("env_value", ["1", "true", "yes"])
@@ -2933,6 +2934,42 @@ def test_prepare_claude_cli_path_degrades_when_wrap_probe_fails(monkeypatch, cap
     assert prepared.cli_path == "/usr/bin/claude"
     assert prepared.enable_native_tools is False
     assert any("cannot wrap the Claude CLI" in record.getMessage() for record in caplog.records), [
+        r.getMessage() for r in caplog.records
+    ]
+
+
+def test_prepare_claude_cli_path_degrades_for_macos_keychain_auth(
+    monkeypatch,
+    caplog,
+) -> None:
+    """Seatbelt must not receive broad Keychain access for Claude OAuth."""
+    from omnigent.inner.claude_sdk_executor import prepare_claude_cli_path
+
+    policy = _active_policy()
+    policy.backend_type = "darwin_seatbelt"
+    monkeypatch.setattr(
+        "omnigent.inner.claude_sdk_executor.resolve_sandbox",
+        lambda *a, **k: policy,
+    )
+    monkeypatch.setattr(
+        "omnigent.inner.claude_sdk_executor._claude_sandbox_has_portable_auth",
+        lambda: False,
+    )
+
+    def _fail_if_called(*args, **kwargs) -> str:
+        raise AssertionError("Keychain-authenticated Claude must not be wrapped")
+
+    monkeypatch.setattr(
+        "omnigent.inner.claude_sdk_executor.create_exec_launcher",
+        _fail_if_called,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="omnigent.inner.claude_sdk_executor"):
+        prepared = prepare_claude_cli_path("/usr/bin/claude", _wrap_probe_spec())
+
+    assert prepared.cli_path == "/usr/bin/claude"
+    assert prepared.enable_native_tools is False
+    assert any("macOS Keychain" in record.getMessage() for record in caplog.records), [
         r.getMessage() for r in caplog.records
     ]
 

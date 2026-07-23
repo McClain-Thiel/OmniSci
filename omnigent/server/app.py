@@ -70,6 +70,7 @@ from omnigent.server.routes.imports import create_imports_router
 from omnigent.server.routes.policy_registry import create_policy_registry_router
 from omnigent.server.routes.runner_tunnel import create_runner_tunnel_router
 from omnigent.server.routes.scheduled_tasks import create_scheduled_tasks_router
+from omnigent.server.routes.science import create_science_router, science_available
 from omnigent.server.routes.session_mcp_servers import create_session_mcp_servers_router
 from omnigent.server.routes.session_policies import create_session_policies_router
 from omnigent.server.routes.sessions import (
@@ -168,9 +169,10 @@ _QWEN_NATIVE_AGENT_NAME = QWEN_NATIVE_CODING_AGENT.agent_name
 _KIMI_NATIVE_AGENT_NAME = KIMI_NATIVE_CODING_AGENT.agent_name
 _DEBBY_AGENT_NAME = "debby"
 _POLLY_AGENT_NAME = "polly"
+_SCIENCE_AGENT_NAME = "science"
 _UNMATCHED_ROUTE_TEMPLATE = "<unmatched>"
 _SESSION_PATH_RE = re.compile(r"/v1/sessions/([^/]+)")
-# polly's and debby's multi-file bundles are packaged under
+# The multi-file example bundles are packaged under
 # omnigent.resources.examples (see pyproject package-data), so they resolve
 # in both a repo checkout and an installed wheel. The presence check in each
 # seeder is a safety net.
@@ -178,6 +180,9 @@ _SESSION_PATH_RE = re.compile(r"/v1/sessions/([^/]+)")
 # Windows checkout (where Git leaves it as a stub text file); a no-op elsewhere.
 _DEBBY_BUNDLE_SOURCE = resolve_repo_symlink(Path(_examples_resources.__file__).parent / "debby")
 _POLLY_BUNDLE_SOURCE = resolve_repo_symlink(Path(_examples_resources.__file__).parent / "polly")
+_SCIENCE_BUNDLE_SOURCE = resolve_repo_symlink(
+    Path(_examples_resources.__file__).parent / "science"
+)
 
 
 class _FastAPICallNext(Protocol):
@@ -453,6 +458,7 @@ def _ensure_default_agents(
     _ensure_default_antigravity_agent(agent_store, artifact_store, agent_cache)
     _ensure_default_qwen_agent(agent_store, artifact_store, agent_cache)
     _ensure_default_kimi_native_agent(agent_store, artifact_store, agent_cache)
+    _ensure_default_science_agent(agent_store, artifact_store, agent_cache)
     _ensure_default_debby_agent(agent_store, artifact_store, agent_cache)
     _ensure_default_polly_agent(agent_store, artifact_store, agent_cache)
     _ensure_extra_builtin_agents(agent_store, artifact_store, agent_cache)
@@ -1011,6 +1017,58 @@ def _ensure_default_debby_agent(
         agent_cache,
         name=_DEBBY_AGENT_NAME,
         bundle_bytes=_build_debby_bundle(),
+    )
+
+
+def _build_science_bundle() -> bytes:
+    """
+    Build a gzipped tarball of the ``examples/science`` agent bundle.
+
+    The science agent ships domain skills alongside ``config.yaml``, so the
+    source is materialized as a directory rather than generated as one YAML
+    file.
+
+    :returns: Gzipped tarball bytes suitable for the artifact store.
+    """
+    import tempfile
+
+    from omnigent.spec import materialize_bundle
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bundle_dir = materialize_bundle(_SCIENCE_BUNDLE_SOURCE, Path(tmpdir) / "bundle")
+        return _tar_gz_dir(bundle_dir)
+
+
+def _ensure_default_science_agent(
+    agent_store: AgentStore,
+    artifact_store: ArtifactStore,
+    agent_cache: Any,
+) -> None:
+    """
+    Register the general science agent when its packaged bundle is present.
+
+    The Web UI treats this as the first-run research agent. Its model is
+    deliberately unpinned and its Codex harness can be overridden per session,
+    so the same scientific behavior works with whichever provider the user has
+    configured.
+
+    :param agent_store: Store for agent metadata.
+    :param artifact_store: Store for agent bundles.
+    :param agent_cache: Cache for loaded agent specs.
+    """
+    if not (_SCIENCE_BUNDLE_SOURCE / "config.yaml").is_file():
+        _logger.debug(
+            "science bundle not found at %s; skipping seed",
+            _SCIENCE_BUNDLE_SOURCE,
+        )
+        return
+
+    _ensure_builtin_agent(
+        agent_store,
+        artifact_store,
+        agent_cache,
+        name=_SCIENCE_AGENT_NAME,
+        bundle_bytes=_build_science_bundle(),
     )
 
 
@@ -2083,6 +2141,9 @@ def create_app(
             "public_sharing_enabled": public_sharing_enabled,
             "server_version": _server_version(),
             "smart_routing_enabled": smart_routing_enabled,
+            # science_enabled gates the OmniSci workbench UI: true only when
+            # the optional omnisci package is importable on this server.
+            "science_enabled": science_available(),
         }
 
     @app.get("/v1/me", response_model=None)  # Union return type (dict | JSONResponse)
@@ -2179,6 +2240,7 @@ def create_app(
         create_builtin_agents_router(
             agent_store,
             agent_cache,
+            artifact_store,
             auth_provider=auth_provider,
         ),
         prefix="/v1",
@@ -2270,6 +2332,14 @@ def create_app(
         ),
         prefix="/v1",
         tags=["sharing"],
+    )
+    # OmniSci science workbench seam (spec §17.1). The router lazy-imports
+    # the optional omnisci package per request, so mounting it is safe
+    # even when science is not installed (handlers then return 503).
+    app.include_router(
+        create_science_router(auth_provider=auth_provider),
+        prefix="/v1",
+        tags=["science"],
     )
 
     # ── Tunnel lifecycle callbacks (Step 8.5 crash recovery) ───

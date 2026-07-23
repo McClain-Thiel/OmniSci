@@ -653,6 +653,7 @@ function renderLanding(infoOverrides: Partial<ServerInfo> = {}, route = "/") {
     public_sharing_enabled: true,
     server_version: null,
     smart_routing_enabled: false,
+    science_enabled: false,
     ...infoOverrides,
   };
   return render(
@@ -701,8 +702,17 @@ describe("NewChatLandingScreen", () => {
     // The home page offers an inline chat box rather than the old
     // "click New session in the sidebar" placeholder. If it regressed to
     // the placeholder, the composer input would be absent and this fails.
-    expect(screen.getByText("What should we do?")).toBeTruthy();
+    expect(screen.getByText("Start a scientific investigation")).toBeTruthy();
+    expect(screen.getByAltText("OmniSci starfish scientist holding a beaker")).toBeInTheDocument();
     expect(screen.getByTestId("new-chat-landing-input")).toBeTruthy();
+  });
+
+  it("prefills a reproducible research prompt from a starter", () => {
+    renderLanding();
+    fireEvent.click(screen.getByRole("button", { name: "Reproduce a result" }));
+    expect(screen.getByTestId("new-chat-landing-input")).toHaveValue(
+      "Reproduce [paper or result]. Define acceptance criteria, identify required data and code, run the workflow, and review discrepancies.",
+    );
   });
 
   it("preserves the typed message and attachments when the landing screen unmounts and remounts", () => {
@@ -911,6 +921,50 @@ describe("NewChatLandingScreen", () => {
     expect(screen.queryByTestId("new-chat-landing-harness-cursor")).toBeNull();
     expect(screen.queryByTestId("new-chat-landing-harness-pi")).toBeNull();
     expect(screen.queryByTestId("new-chat-landing-harness-copilot")).toBeNull();
+  });
+
+  it("starts Science on a ready fallback when its Codex default needs setup", async () => {
+    mockHosts([
+      {
+        ...host("online"),
+        configured_harnesses: {
+          codex: "needs-auth",
+          "claude-sdk": true,
+          cursor: true,
+          pi: false,
+          antigravity: false,
+          copilot: false,
+        },
+      } as Host,
+    ]);
+    mockAgents([
+      {
+        id: "ag_science",
+        name: "science",
+        display_name: "Science",
+        description: "General science agent",
+        harness: "codex",
+        skills: [],
+      },
+    ]);
+    authenticatedFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: "conv_science" }),
+    } as unknown as Response);
+
+    renderLanding();
+    fireEvent.change(screen.getByTestId("new-chat-landing-input"), {
+      target: { value: "review this result" },
+    });
+    fireEvent.submit(screen.getByTestId("new-chat-landing-composer"));
+
+    await waitFor(() => expect(authenticatedFetchMock).toHaveBeenCalled());
+    const [, init] = authenticatedFetchMock.mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string) as {
+      harness_override?: string;
+    };
+    expect(body.harness_override).toBe("cursor");
+    expect(screen.queryByTestId("new-chat-landing-harness-warning")).toBeNull();
   });
 
   it("seeds the working directory from the host's most-recent path", async () => {
@@ -1903,6 +1957,26 @@ describe("NewChatLandingScreen skill pills", () => {
     return screen.getByTestId("new-chat-landing-input") as HTMLTextAreaElement;
   }
 
+  it("surfaces the built-in Science specialist modes", () => {
+    mockAgents([
+      {
+        id: "ag_science",
+        name: "science",
+        display_name: "Science",
+        description: "General science agent",
+        harness: "codex",
+        skills: [
+          { name: "biology", description: "Biology specialist" },
+          { name: "chemistry", description: "Chemistry specialist" },
+        ],
+      },
+    ]);
+    renderLanding();
+
+    expect(screen.getByTestId("skill-pill-biology").textContent).toBe("/biology");
+    expect(screen.getByTestId("skill-pill-chemistry").textContent).toBe("/chemistry");
+  });
+
   it("renders bundled skills as pills without typing anything", () => {
     mockAgents([debbyAgent()]);
     renderLanding();
@@ -2313,7 +2387,7 @@ describe("NewChatLandingScreen agent picker (mobile)", () => {
   });
 });
 
-describe("NewChatLandingScreen custom-agent sandbox gating", () => {
+describe("NewChatLandingScreen app-level agent creation", () => {
   beforeEach(setupLandingMocks);
   afterEach(() => {
     cleanup();
@@ -2331,15 +2405,15 @@ describe("NewChatLandingScreen custom-agent sandbox gating", () => {
     );
   }
 
-  it("hides 'Create custom agent' on a sandbox", async () => {
+  it("offers durable agent creation on a sandbox", async () => {
     renderLanding({ managed_sandboxes_enabled: true });
     await selectSandbox();
     fireEvent.pointerDown(screen.getByTestId("new-chat-landing-agent-select"), { button: 0 });
-    // The item is omitted entirely on a sandbox target.
-    expect(screen.queryByTestId("new-chat-landing-create-agent")).toBeNull();
+    fireEvent.click(screen.getByTestId("new-chat-landing-create-agent"));
+    await waitFor(() => expect(screen.getByTestId("create-agent-dialog")).toBeTruthy());
   });
 
-  it("shows 'Create custom agent' on a host and opens the dialog", async () => {
+  it("offers app-level agent creation on a host and opens the dialog", async () => {
     renderLanding({ managed_sandboxes_enabled: true });
     // The managed default is the sandbox even with a host present, so switch
     // to the connected host (machine-1) first.
@@ -2362,9 +2436,8 @@ describe("NewChatLandingScreen custom-agent sandbox gating", () => {
     await waitFor(() => expect(screen.getByTestId("create-agent-dialog")).toBeTruthy());
   });
 
-  // Switch the target to the connected host, then create + submit a pending
-  // custom agent from the dialog so it becomes the selected agent.
-  async function createAndSelectPendingAgentOnHost(): Promise<void> {
+  // Switch to the connected host, persist a reusable template, and select it.
+  async function createAndSelectAgentOnHost(): Promise<void> {
     await waitFor(() =>
       expect(screen.getByTestId("new-chat-landing-host-chip").textContent).toContain("Sandbox"),
     );
@@ -2383,26 +2456,37 @@ describe("NewChatLandingScreen custom-agent sandbox gating", () => {
     fireEvent.change(screen.getByTestId("create-agent-model"), {
       target: { value: "claude-sonnet-4-20250514" },
     });
+    authenticatedFetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      statusText: "Created",
+      json: async () => ({
+        id: "ag_custom",
+        name: "my-agent",
+        description: null,
+        harness: "claude-sdk",
+        builtin: false,
+        created_at: 123,
+      }),
+    } as Response);
     fireEvent.click(screen.getByTestId("create-agent-submit"));
     await waitFor(() =>
       expect(screen.getByTestId("new-chat-landing-agent-select").textContent).toContain("my-agent"),
     );
   }
 
-  it("drops a selected pending custom agent when the target switches to a sandbox", async () => {
+  it("keeps a saved app-level agent selected when the target switches to a sandbox", async () => {
     renderLanding({ managed_sandboxes_enabled: true });
-    await createAndSelectPendingAgentOnHost();
-    // Switch back to the sandbox: the pending pick can't run there, so the
-    // selection falls back to a real agent and the pending row disappears.
+    await createAndSelectAgentOnHost();
+    // Durable templates are bindable on managed targets; switching execution
+    // target must not throw away the agent selection.
     fireEvent.pointerDown(screen.getByTestId("new-chat-landing-host-chip"), { button: 0 });
     fireEvent.click(screen.getByTestId("new-chat-landing-sandbox-option"));
     await waitFor(() =>
       expect(screen.getByTestId("new-chat-landing-host-chip").textContent).toContain("Sandbox"),
     );
-    expect(screen.getByTestId("new-chat-landing-agent-select").textContent).not.toContain(
-      "my-agent",
-    );
+    expect(screen.getByTestId("new-chat-landing-agent-select").textContent).toContain("my-agent");
     fireEvent.pointerDown(screen.getByTestId("new-chat-landing-agent-select"), { button: 0 });
-    expect(screen.queryByTestId("new-chat-landing-agent-pending")).toBeNull();
+    expect(screen.getByTestId("new-chat-landing-agent-ag_custom")).toBeTruthy();
   });
 });
