@@ -104,13 +104,11 @@ export interface ServerInfo {
    */
   smart_routing_enabled: boolean;
   /**
-   * True when the server can transcribe dictation audio
-   * (``WS /v1/dictation/stream``; the ``dictation`` extra plus models
-   * are installed). Gates the composer mic button's server
-   * speech-to-text fallback where the browser Web Speech API has no
-   * backend (Electron, Firefox/Chromium).
+   * True when the science workbench package is importable on the server
+   * (the ``/v1/science`` routes exist). Gates the Science tab in the right
+   * workspace rail. Fails closed: a failed probe hides the tab.
    */
-  dictation_available: boolean;
+  science_enabled: boolean;
 }
 
 /** Sentinel used when the probe fails — accounts is off, no login URL. */
@@ -129,7 +127,9 @@ const _OFF: ServerInfo = {
   public_sharing_enabled: true,
   server_version: null,
   smart_routing_enabled: false,
-  dictation_available: false,
+  // Science fails CLOSED: a failed probe must hide the Science tab rather
+  // than render a panel whose endpoints don't exist.
+  science_enabled: false,
 };
 
 let _cached: ServerInfo | null = null;
@@ -170,7 +170,7 @@ export async function resolveServerInfo(): Promise<ServerInfo> {
           public_sharing_enabled: data.public_sharing_enabled !== false,
           server_version: typeof data.server_version === "string" ? data.server_version : null,
           smart_routing_enabled: data.smart_routing_enabled === true,
-          dictation_available: data.dictation_available === true,
+          science_enabled: data.science_enabled === true,
         };
         return _cached;
       }

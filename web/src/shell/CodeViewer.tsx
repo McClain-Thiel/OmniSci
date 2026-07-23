@@ -51,20 +51,26 @@ import { MarkdownRichTextViewer } from "./MarkdownRichTextViewer";
 import {
   type ActiveSelection,
   type SaveStatus,
+  csvDelimiterForPath,
   detectLang,
   getSelectionOffsets,
   indexToLine,
   isBinaryPath,
   isImageFile,
+  isJsonPath,
   isNotebookPath,
+  isParquetPath,
   isPdfFile,
   lineOverlapsSelection,
 } from "./codeViewerHelpers";
+import { CsvTableViewer } from "./CsvTableViewer";
+import { JsonTreeViewer } from "./JsonTreeViewer";
 import { NotebookPreview } from "./NotebookPreview";
 import { PreviewSearchBar } from "./PreviewSearchBar";
 import { renderLineTokens } from "./codeViewerRendering";
 import { HtmlCommentViewer } from "./HtmlCommentViewer";
 import { TruncatedBanner } from "./TruncatedBanner";
+import { isWorkspaceRelativeSrc, resolveWorkspacePath } from "./TipTapWorkspaceImage";
 import { useLightbox } from "@/components/ImageLightbox";
 import { getEmbedRoot } from "@/lib/host";
 
@@ -78,6 +84,9 @@ const MonacoCodeEditor = lazy(() =>
 // react-pdf + pdf.js (worker) is heavy; load it only when a PDF is actually
 // viewed so it never enters the initial bundle.
 const PdfViewer = lazy(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })));
+const ParquetTableViewer = lazy(() =>
+  import("./ParquetTableViewer").then((m) => ({ default: m.ParquetTableViewer })),
+);
 
 // ---------------------------------------------------------------------------
 // MarkdownPreview — read-only render of Markdown content via react-markdown + GFM
@@ -148,9 +157,13 @@ const MARKDOWN_COMPONENTS: Components = {
 
 function MarkdownPreview({
   content,
+  path,
+  onNavigateTo,
   rootRef,
 }: {
   content: string;
+  path: string;
+  onNavigateTo?: (path: string) => void;
   rootRef?: RefObject<HTMLDivElement | null>;
 }) {
   return (
@@ -158,6 +171,30 @@ function MarkdownPreview({
       ref={rootRef}
       data-preview-scroll
       className="markdown-preview px-6 py-4 overflow-auto h-full prose dark:prose-invert prose-sm max-w-none"
+      onClick={(event) => {
+        const target = event.target;
+        const anchor = target instanceof Element ? target.closest("a[href]") : null;
+        const href = anchor?.getAttribute("href") ?? "";
+        if (
+          event.defaultPrevented ||
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey ||
+          !href ||
+          href.startsWith("#") ||
+          href.startsWith("?") ||
+          !isWorkspaceRelativeSrc(href) ||
+          !onNavigateTo
+        ) {
+          return;
+        }
+        const linkedPath = resolveWorkspacePath(path, href);
+        if (!linkedPath) return;
+        event.preventDefault();
+        onNavigateTo(linkedPath);
+      }}
     >
       <ReactMarkdown
         remarkPlugins={MARKDOWN_REMARK_PLUGINS}
@@ -176,6 +213,8 @@ function MarkdownPreview({
 // recompute when the rendered document changes.
 function PreviewWithSearch({
   content,
+  path,
+  onNavigateTo,
   isNotebook,
   truncated,
   searchOpen,
@@ -183,6 +222,8 @@ function PreviewWithSearch({
   searchInputRef,
 }: {
   content: string;
+  path: string;
+  onNavigateTo?: (path: string) => void;
   isNotebook: boolean;
   truncated: boolean;
   searchOpen: boolean;
@@ -202,7 +243,12 @@ function PreviewWithSearch({
   const preview = isNotebook ? (
     <NotebookPreview content={content} rootRef={previewRef} />
   ) : (
-    <MarkdownPreview content={content} rootRef={previewRef} />
+    <MarkdownPreview
+      content={content}
+      path={path}
+      onNavigateTo={onNavigateTo}
+      rootRef={previewRef}
+    />
   );
   // The find bar sits above the preview; a truncated preview also shows the
   // banner. The bar renders nothing when closed, so layout is unchanged then.
@@ -319,6 +365,8 @@ export interface CodeViewerProps {
   onSaveStatusChange?: (status: SaveStatus) => void;
   /** Forwarded to MarkdownRichTextViewer → MarkdownCommentPlugin. */
   pendingBodyRef?: RefObject<string>;
+  /** Opens a workspace-relative link from a rendered Markdown preview. */
+  onNavigateTo?: (path: string) => void;
 }
 
 export function CodeViewer({
@@ -336,6 +384,7 @@ export function CodeViewer({
   onDirtyChange,
   onSaveStatusChange,
   pendingBodyRef,
+  onNavigateTo,
 }: CodeViewerProps) {
   const canEdit = useCanEdit(conversationId);
 
@@ -648,12 +697,69 @@ export function CodeViewer({
       </Suspense>
     );
   }
+  if (fileQuery.data && isParquetPath(path)) {
+    return (
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center p-8 text-muted-foreground text-sm">
+            Loading table viewer…
+          </div>
+        }
+      >
+        <ParquetTableViewer data={fileQuery.data} path={path} conversationId={conversationId} />
+      </Suspense>
+    );
+  }
   if (fileQuery.data?.encoding === "base64" || isBinaryPath(path)) {
     return (
       <div className="flex items-center justify-center p-8 text-muted-foreground text-sm">
         Preview not available for binary files.
       </div>
     );
+  }
+
+  // Science data viewers (spec §14.3): CSV/TSV render as a parsed table and
+  // JSON as a collapsible tree. Both keep the Monaco source view as the escape
+  // hatch, so the editor element is built once and shared with the showMonaco
+  // branch below.
+  const monacoEditor = (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center p-8 text-muted-foreground text-sm">
+          Loading…
+        </div>
+      }
+    >
+      <MonacoCodeEditor
+        content={content}
+        conversationId={conversationId}
+        path={path}
+        isSettled={fileQuery.isSuccess}
+        truncated={truncated}
+        onDirtyChange={onDirtyChange}
+        onSaveStatusChange={onSaveStatusChange}
+        searchOpen={searchOpen}
+        onSearchHandled={handleSearchHandled}
+        comments={comments}
+        activeSelection={activeSelection}
+        onSetActiveSelection={onSetActiveSelection}
+        pendingBodyRef={pendingBodyRef}
+      />
+    </Suspense>
+  );
+
+  if (fileQuery.data && csvDelimiterForPath(path)) {
+    return (
+      <CsvTableViewer
+        data={fileQuery.data}
+        path={path}
+        conversationId={conversationId}
+        source={monacoEditor}
+      />
+    );
+  }
+  if (fileQuery.data && isJsonPath(path)) {
+    return <JsonTreeViewer content={content} source={monacoEditor} />;
   }
 
   if (viewMode === "editor" && lang === "markdown") {
@@ -696,6 +802,8 @@ export function CodeViewer({
     return (
       <PreviewWithSearch
         content={content}
+        path={path}
+        onNavigateTo={onNavigateTo}
         isNotebook={isNotebookPath(path)}
         truncated={truncated}
         searchOpen={searchOpen}
@@ -706,31 +814,7 @@ export function CodeViewer({
   }
 
   if (showMonaco) {
-    return (
-      <Suspense
-        fallback={
-          <div className="flex items-center justify-center p-8 text-muted-foreground text-sm">
-            Loading…
-          </div>
-        }
-      >
-        <MonacoCodeEditor
-          content={content}
-          conversationId={conversationId}
-          path={path}
-          isSettled={fileQuery.isSuccess}
-          truncated={truncated}
-          onDirtyChange={onDirtyChange}
-          onSaveStatusChange={onSaveStatusChange}
-          searchOpen={searchOpen}
-          onSearchHandled={handleSearchHandled}
-          comments={comments}
-          activeSelection={activeSelection}
-          onSetActiveSelection={onSetActiveSelection}
-          pendingBodyRef={pendingBodyRef}
-        />
-      </Suspense>
-    );
+    return monacoEditor;
   }
 
   // Compute matches for the current search query.

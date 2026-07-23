@@ -4,7 +4,7 @@
  * Renders into the AppShell chat outlet (see App.tsx) so the conversations
  * sidebar stays put when you enter settings — only the main area swaps to
  * this view. Inside, a section nav (left) drives a content panel (right),
- * modeled on a desktop-app settings window; a "← Back to Omnigent" link
+ * modeled on a desktop-app settings window; a "← Back to OmniSci" link
  * returns to the composer.
  *
  * Sections:
@@ -40,12 +40,15 @@ import {
 import {
   ArchiveRestoreIcon,
   AlertTriangleIcon,
+  BotIcon,
   CheckIcon,
+  FlaskConicalIcon,
   KeyRoundIcon,
   LaptopMinimalIcon,
   LogOutIcon,
   MinusIcon,
   MonitorIcon,
+  NetworkIcon,
   MoonIcon,
   PanelRightCloseIcon,
   PanelRightIcon,
@@ -54,10 +57,18 @@ import {
   Trash2Icon,
   UserCogIcon,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
 import { PageScroll } from "@/components/PageScroll";
+import { ResearchSettings } from "@/components/science/ResearchSettings";
+import {
+  ComputeSettings,
+  StorageSettings,
+  ToolsSettings,
+} from "@/components/science/ScienceInfrastructureSettings";
 import { ThemeColorPicker } from "@/components/theme/ThemeColorPicker";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -161,6 +172,14 @@ import {
   updateBridge,
 } from "@/lib/nativeBridge";
 import { cn } from "@/lib/utils";
+import { useAvailableAgents, type AvailableAgent } from "@/hooks/useAvailableAgents";
+import { useHosts } from "@/hooks/useHosts";
+import { buildAgentBundle, createAgentTemplate } from "@/lib/agentBundle";
+import { useBrainHarnessLabels } from "@/lib/agentLabels";
+import { readLastAgentId, writeLastAgentId } from "@/lib/agentPreferences";
+import { readLastHarness, writeLastHarness } from "@/lib/harnessPreferences";
+import { automaticScienceHarness, SCIENCE_AGENT_NAME } from "@/lib/scienceAgentDefaults";
+import { CreateAgentDialog } from "@/shell/CreateAgentDialog";
 
 // Admin-only management surfaces, rendered as the Members / Policies settings
 // sub-categories. Visible to admins in all modes (accounts, OIDC, single-user).
@@ -212,6 +231,46 @@ export function SettingsPage() {
 
   return (
     <PageScroll contentClassName="px-8" extraBottom="2.5rem">
+      {section === "research" && (
+        <Section
+          title="Provenance"
+          description="Configure how OmniSci records scientific work in each session workspace."
+        >
+          <ResearchSettings scienceEnabled={info !== "loading" && info.science_enabled} />
+        </Section>
+      )}
+      {section === "agents" && (
+        <Section
+          title="Agents"
+          description="Create reusable scientific roles once, then start them in any project."
+        >
+          <AgentsSection />
+        </Section>
+      )}
+      {section === "compute" && (
+        <Section
+          title="Compute"
+          description="Choose where OmniSci jobs run and set universal provider defaults."
+        >
+          <ComputeSettings />
+        </Section>
+      )}
+      {section === "storage" && (
+        <Section
+          title="Storage"
+          description="Define the local and object-storage boundaries available to research jobs."
+        >
+          <StorageSettings />
+        </Section>
+      )}
+      {section === "tools" && (
+        <Section
+          title="Tools & connections"
+          description="Configure app-level capabilities once, then grant them to any agent."
+        >
+          <ToolsSettings />
+        </Section>
+      )}
       {section === "appearance" && <AppearanceSection />}
       {section === "git" && <GitSection />}
       {section === "shortcuts" && <ShortcutsSection />}
@@ -220,6 +279,260 @@ export function SettingsPage() {
       {section === "cli" && isElectronShell() && <LocalCliSection />}
       {section === "updates" && isElectronShell() && <UpdatesSection />}
     </PageScroll>
+  );
+}
+
+function AgentsSection() {
+  const queryClient = useQueryClient();
+  const { data: agents = [], isLoading, error } = useAvailableAgents();
+  const [createOpen, setCreateOpen] = useState(false);
+  const scienceAgent = agents.find((agent) => agent.name === SCIENCE_AGENT_NAME);
+  const catalogAgents = agents.filter((agent) => agent.name !== SCIENCE_AGENT_NAME);
+
+  return (
+    <div className="flex flex-col gap-5">
+      {scienceAgent && <ScienceAgentCard agent={scienceAgent} />}
+
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-sm font-medium">{scienceAgent ? "Other agents" : "Agent catalog"}</h2>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            Reusable YAML-backed roles. Runtime credentials remain outside their bundles.
+          </p>
+        </div>
+        <Button className="shrink-0" onClick={() => setCreateOpen(true)}>
+          <PlusIcon className="size-4" />
+          New agent
+        </Button>
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] border-b border-border px-4 py-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <span>Agent</span>
+          <span>Source</span>
+        </div>
+        {isLoading ? (
+          <p className="px-4 py-6 text-sm text-muted-foreground">Loading agent catalog…</p>
+        ) : error ? (
+          <p className="px-4 py-6 text-sm text-destructive">
+            {error instanceof Error ? error.message : String(error)}
+          </p>
+        ) : catalogAgents.length === 0 ? (
+          <p className="px-4 py-6 text-sm text-muted-foreground">
+            {scienceAgent ? "No additional agents yet." : "No agents are registered yet."}
+          </p>
+        ) : (
+          <div className="divide-y divide-border">
+            {catalogAgents.map((agent) => (
+              <div
+                key={agent.id}
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                    <BotIcon className="size-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-medium">{agent.display_name}</p>
+                      {agent.harness && (
+                        <span className="truncate font-mono text-[10px] text-muted-foreground">
+                          {agent.harness}
+                        </span>
+                      )}
+                    </div>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {agent.description || "No description"}
+                    </p>
+                  </div>
+                </div>
+                <Badge variant={agent.builtin === false ? "secondary" : "outline"}>
+                  {agent.builtin === false ? "Custom" : "Built in"}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <CreateAgentDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreate={async (input) => {
+          await createAgentTemplate(await buildAgentBundle(input));
+          await queryClient.invalidateQueries({ queryKey: ["available-agents"] });
+        }}
+      />
+    </div>
+  );
+}
+
+function ScienceAgentCard({ agent }: { agent: AvailableAgent }) {
+  const harnessLabels = useBrainHarnessLabels();
+  const { data: hosts = [] } = useHosts();
+  const host = hosts.find((candidate) => candidate.status === "online");
+  const [runtimePreference, setRuntimePreference] = useState(
+    () => readLastHarness(agent.id) ?? "automatic",
+  );
+  const [defaultAgentId, setDefaultAgentId] = useState(() => readLastAgentId());
+
+  const explicitHarness = runtimePreference === "automatic" ? null : runtimePreference;
+  const automaticHarness =
+    explicitHarness === null
+      ? automaticScienceHarness(agent.harness, harnessLabels, host?.configured_harnesses)
+      : null;
+  const effectiveHarness = explicitHarness ?? automaticHarness ?? agent.harness;
+  const readiness = effectiveHarness ? host?.configured_harnesses?.[effectiveHarness] : undefined;
+  const isDefault = defaultAgentId === null || defaultAgentId === agent.id;
+  const skillNames = agent.skills.map((skill) => skill.name);
+
+  function updateRuntime(value: string) {
+    setRuntimePreference(value);
+    writeLastHarness(agent.id, value === "automatic" ? null : value);
+  }
+
+  function makeDefault() {
+    writeLastAgentId(agent.id);
+    setDefaultAgentId(agent.id);
+  }
+
+  return (
+    <div
+      data-testid="settings-science-agent"
+      className="overflow-hidden rounded-2xl border border-teal-500/25 bg-[linear-gradient(135deg,var(--card)_0%,var(--card)_58%,rgba(20,184,166,0.08)_100%)]"
+    >
+      <div className="grid lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
+        <div className="p-5 sm:p-6">
+          <div className="flex items-start gap-4">
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-teal-500/20 bg-teal-500/10 text-teal-700 dark:text-teal-300">
+              <FlaskConicalIcon className="size-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-teal-700 dark:text-teal-300">
+                  Default research team
+                </p>
+                <Badge variant="outline" className="px-1.5 py-0 text-[9px] font-normal">
+                  Built in
+                </Badge>
+              </div>
+              <h2 className="mt-1 text-xl font-semibold tracking-tight">Science</h2>
+              <p className="mt-1 max-w-2xl text-sm leading-5 text-muted-foreground">
+                One rigorous generalist for literature, analysis, experimental design, and
+                reproducible work. It changes runtime without changing scientific behavior.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 border-t border-border/70 pt-4">
+            <div className="mb-3 flex items-center gap-2">
+              <NetworkIcon className="size-3.5 text-muted-foreground" />
+              <p className="text-xs font-medium">Specialist modes</p>
+              <span className="text-xs text-muted-foreground">load into the same conversation</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {skillNames.map((name) => (
+                <span
+                  key={name}
+                  className="rounded-full border border-border bg-card/80 px-2.5 py-1 font-mono text-[11px] text-foreground"
+                >
+                  /{name}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="border-t border-border/70 bg-card/50 p-5 lg:border-t-0 lg:border-l">
+          <p className="text-xs font-medium">Default runtime</p>
+          <p className="mt-1 text-xs leading-4 text-muted-foreground">
+            Used for new Science sessions on this device. You can still switch per session.
+          </p>
+          <Select value={runtimePreference} onValueChange={updateRuntime}>
+            <SelectTrigger
+              data-testid="settings-science-runtime"
+              className="mt-3 w-full bg-background"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="automatic">
+                Automatic
+                {effectiveHarness
+                  ? ` · ${harnessLabels[effectiveHarness] ?? effectiveHarness}`
+                  : ""}
+              </SelectItem>
+              {Object.entries(harnessLabels).map(([id, label]) => (
+                <SelectItem key={id} value={id}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <div className="mt-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <span className="truncate text-xs font-medium">
+                {effectiveHarness
+                  ? (harnessLabels[effectiveHarness] ?? effectiveHarness)
+                  : "No runtime"}
+              </span>
+              <RuntimeStatus readiness={readiness} hostKnown={host !== undefined} />
+            </div>
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+              {host === undefined
+                ? "Connect a host to verify installed harnesses."
+                : readiness === false || typeof readiness === "string"
+                  ? `Run omnigent setup on ${host.name} before starting this agent.`
+                  : runtimePreference === "automatic"
+                    ? `Chosen from the runtimes reported by ${host.name}.`
+                    : `Pinned for new sessions on ${host.name}.`}
+            </p>
+          </div>
+
+          <Button
+            variant={isDefault ? "secondary" : "outline"}
+            className="mt-4 w-full"
+            disabled={isDefault}
+            onClick={makeDefault}
+            data-testid="settings-science-make-default"
+          >
+            <CheckIcon className="size-4" />
+            {isDefault ? "Default agent" : "Make default agent"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RuntimeStatus({
+  readiness,
+  hostKnown,
+}: {
+  readiness: boolean | string | undefined;
+  hostKnown: boolean;
+}) {
+  if (!hostKnown || readiness === undefined) {
+    return <span className="text-[10px] text-muted-foreground">Not verified</span>;
+  }
+  if (readiness === true) {
+    return (
+      <span className="flex items-center gap-1 text-[10px] font-medium text-teal-700 dark:text-teal-300">
+        <span className="size-1.5 rounded-full bg-teal-500" />
+        Ready
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+      <span className="size-1.5 rounded-full bg-amber-500" />
+      {readiness === "needs-auth"
+        ? "Needs login"
+        : readiness === "binary-missing"
+          ? "Not installed"
+          : "Needs setup"}
+    </span>
   );
 }
 
@@ -621,7 +934,7 @@ function ColorThemeControl() {
               <div className="text-sm font-medium">Theme palette</div>
               <div className="truncate text-xs text-muted-foreground">
                 {selection === "custom"
-                  ? `Based on ${PALETTES.find((palette) => palette.id === customTheme.basePalette)?.label ?? "Omnigent"}`
+                  ? `Based on ${PALETTES.find((palette) => palette.id === customTheme.basePalette)?.label ?? "OmniSci"}`
                   : selectedPalette?.blurb}
               </div>
             </div>
@@ -809,7 +1122,7 @@ function AppearanceSection() {
   const isEmbedded = useIsEmbedded();
 
   return (
-    <Section title="Appearance" description="Choose how Omnigent looks on this device.">
+    <Section title="Appearance" description="Choose how OmniSci looks on this device.">
       <div className="flex flex-col gap-8">
         {isEmbedded ? (
           <div className="flex flex-col gap-3">
@@ -849,7 +1162,7 @@ function AppearanceSection() {
 /** Git behavior settings. */
 function GitSection() {
   return (
-    <Section title="Git" description="Configure how Omnigent works with Git.">
+    <Section title="Git" description="Configure how OmniSci works with Git.">
       <div className="flex flex-col gap-8">
         <DefaultBaseBranchControl />
       </div>
@@ -1261,7 +1574,7 @@ function ShortcutsSection() {
 }
 
 /**
- * Desktop-only: shows which Omnigent CLI binary the shell resolved
+ * Desktop-only: shows which Omnigent engine CLI binary the shell resolved
  * (auto-detected or a custom override). Read-only — setting a custom path is
  * done on the connect/setup screen (the trusted surface that allows free-text
  * entry); the SPA exposes no path setter. A safe "reset to auto-detected" stays
@@ -1293,7 +1606,7 @@ function LocalCliSection() {
   return (
     <Section
       title="Local CLI"
-      description="The Omnigent command-line tool this app uses to run a local server and connect this machine as a runner."
+      description="The Omnigent engine CLI that OmniSci uses to run a local server and connect this machine as a runner."
     >
       {status === null ? (
         <p className="text-sm text-muted-foreground">CLI status is unavailable.</p>
@@ -1326,7 +1639,7 @@ function LocalCliSection() {
           ) : (
             <div className="flex flex-col gap-2">
               <p className="text-sm text-muted-foreground">
-                The Omnigent CLI wasn't found. Install it, then set its path from the connect
+                The Omnigent engine CLI wasn't found. Install it, then set its path from the connect
                 screen:
               </p>
               {status.installCommand && (
@@ -1358,7 +1671,7 @@ function LocalCliSection() {
 
 const UPDATE_MODE_LABELS: Record<UpdateMode, string> = {
   default: "Automatic (check periodically, ask before installing)",
-  start: "Check when Omnigent starts",
+  start: "Check when OmniSci starts",
   manual: "Manual only",
   none: "Off",
 };
@@ -1442,7 +1755,7 @@ function UpdatesSection() {
   return (
     <Section
       title="Updates"
-      description="Desktop app update preferences for this installed Omnigent shell."
+      description="Desktop app update preferences for this installed OmniSci shell."
     >
       {config === null ? (
         <p className="text-sm text-muted-foreground">Update settings are unavailable.</p>

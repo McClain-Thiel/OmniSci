@@ -1,7 +1,7 @@
 """Tests for the built-in agent bundle builders in ``omnigent/server/app.py``.
 
 The server seeds Web-UI-launchable agents (claude-native, codex-native, and
-the shipped ``debby`` / ``polly`` examples) by materializing each spec into a
+the shipped ``debby`` / ``polly`` / ``science`` examples) by materializing each spec into a
 gzipped tarball at startup. These builders were previously exercised only
 transitively by the agents' e2e suites; a packaging regression (a dropped
 ``config.yaml``, a spec that no longer materializes) would surface late and
@@ -31,18 +31,20 @@ _BUILDERS = [
     ("_build_kiro_native_bundle", "kiro-native-ui.yaml", False),
     ("_build_debby_bundle", "config.yaml", True),
     ("_build_polly_bundle", "config.yaml", True),
+    ("_build_science_bundle", "config.yaml", True),
 ]
 
 
 def _shipped_example_missing(builder: str) -> bool:
     """Return True when ``builder``'s shipped-example source is not packaged here.
 
-    debby/polly are only seeded when their bundle ships with the wheel; a
+    debby/polly/science are only seeded when their bundle ships with the wheel; a
     generic deployment legitimately omits them. Skip rather than fail there.
     """
     source = {
         "_build_debby_bundle": app._DEBBY_BUNDLE_SOURCE,
         "_build_polly_bundle": app._POLLY_BUNDLE_SOURCE,
+        "_build_science_bundle": app._SCIENCE_BUNDLE_SOURCE,
     }[builder]
     return not (source / "config.yaml").is_file()
 

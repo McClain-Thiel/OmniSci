@@ -1,5 +1,14 @@
-import { useState } from "react";
-import { PlusIcon, TrashIcon } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import {
+  CheckIcon,
+  CircleAlertIcon,
+  FileCode2Icon,
+  Globe2Icon,
+  Loader2Icon,
+  SearchIcon,
+  ServerCogIcon,
+  TerminalSquareIcon,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -7,8 +16,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -18,103 +29,33 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { BRAIN_HARNESS_LABELS, useBrainHarnessLabels } from "@/lib/agentLabels";
-import type { AgentBundleInput, MCPServerInput } from "@/lib/agentBundle";
+import { buildAgentYaml, type AgentBundleInput, type WorkspaceAccessMode } from "@/lib/agentBundle";
+import { cn } from "@/lib/utils";
 
-/**
- * Harness options for the picker. "default" uses the server's default
- * executor (no explicit harness in the bundle).
- */
 const DEFAULT_HARNESS = Object.keys(BRAIN_HARNESS_LABELS)[0];
 
-/** A single MCP server row in the form. */
-interface MCPFormEntry {
-  /** Stable key for React list rendering. */
-  key: number;
-  name: string;
-  transport: "http" | "stdio";
-  url: string;
-  headers: string;
-  command: string;
-  args: string;
-  env: string;
-}
-
-function emptyMCPEntry(key: number): MCPFormEntry {
-  return {
-    key,
-    name: "",
-    transport: "stdio",
-    url: "",
-    headers: "",
-    command: "",
-    args: "",
-    env: "",
-  };
-}
-
-/** Parse "KEY=VAL" or "KEY: VAL" lines into a Record. */
-function parseKVLines(text: string): Record<string, string> | undefined {
-  const lines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-  if (lines.length === 0) return undefined;
-  const result: Record<string, string> = {};
-  for (const line of lines) {
-    // Support both KEY=VALUE (env-var style) and KEY: VALUE (HTTP header style).
-    const eq = line.indexOf("=");
-    const colon = line.indexOf(":");
-    let sep = -1;
-    if (eq > 0 && colon > 0) sep = Math.min(eq, colon);
-    else if (eq > 0) sep = eq;
-    else if (colon > 0) sep = colon;
-    if (sep > 0) {
-      result[line.slice(0, sep).trim()] = line.slice(sep + 1).trim();
-    }
-  }
-  return Object.keys(result).length > 0 ? result : undefined;
-}
-
-/** Convert form entries to the bundle input shape. */
-function toMCPInputs(entries: MCPFormEntry[]): MCPServerInput[] | undefined {
-  const result: MCPServerInput[] = [];
-  for (const e of entries) {
-    const name = e.name.trim();
-    if (!name) continue;
-    if (e.transport === "stdio") {
-      const command = e.command.trim();
-      if (!command) continue;
-      result.push({
-        name,
-        transport: "stdio",
-        command,
-        args: e.args
-          .split(/\s+/)
-          .map((a) => a.trim())
-          .filter(Boolean),
-        env: parseKVLines(e.env),
-      });
-    } else {
-      const url = e.url.trim();
-      if (!url) continue;
-      result.push({
-        name,
-        transport: "http",
-        url,
-        headers: parseKVLines(e.headers),
-      });
-    }
-  }
-  return result.length > 0 ? result : undefined;
-}
+const BUILTIN_CAPABILITIES = [
+  {
+    id: "web_search",
+    label: "Web search",
+    description: "Find papers, documentation, and current sources.",
+    icon: SearchIcon,
+  },
+  {
+    id: "web_fetch",
+    label: "Read web pages",
+    description: "Open and extract content from selected sources.",
+    icon: Globe2Icon,
+  },
+] as const;
 
 /**
- * Dialog for creating a custom agent from the new-session picker.
+ * Visual editor for one reusable app-level agent template.
  *
- * Collects a name, optional description, optional system instructions,
- * a harness choice, and zero or more MCP server declarations. On submit,
- * passes the agent configuration back to the parent via `onCreate` so it
- * can build a bundle and start a session with it.
+ * YAML remains the portable source of truth: the form produces config.yaml
+ * and AGENTS.md, while the server stores the bundle as a durable template.
+ * Credentials are deliberately absent. Shared tool connections will be
+ * referenced from the app-level connection registry rather than copied here.
  */
 export function CreateAgentDialog({
   open,
@@ -123,7 +64,7 @@ export function CreateAgentDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreate: (input: AgentBundleInput) => void;
+  onCreate: (input: AgentBundleInput) => void | Promise<void>;
 }) {
   const brainHarnessLabels = useBrainHarnessLabels();
   const harnessOptions = Object.entries(brainHarnessLabels).map(([value, label]) => ({
@@ -135,8 +76,24 @@ export function CreateAgentDialog({
   const [instructions, setInstructions] = useState("");
   const [harness, setHarness] = useState(DEFAULT_HARNESS);
   const [model, setModel] = useState("");
-  const [mcpEntries, setMcpEntries] = useState<MCPFormEntry[]>([]);
-  const [nextKey, setNextKey] = useState(0);
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceAccessMode>("write");
+  const [builtins, setBuiltins] = useState<string[]>(["web_search", "web_fetch"]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const input = useMemo<AgentBundleInput>(
+    () => ({
+      name: name.trim() || "new-science-agent",
+      description: description.trim() || undefined,
+      instructions: instructions.trim() || undefined,
+      harness,
+      model: model.trim() || undefined,
+      workspaceMode,
+      builtins,
+    }),
+    [builtins, description, harness, instructions, model, name, workspaceMode],
+  );
+  const yaml = useMemo(() => buildAgentYaml(input), [input]);
 
   function reset() {
     setName("");
@@ -144,272 +101,351 @@ export function CreateAgentDialog({
     setInstructions("");
     setHarness(DEFAULT_HARNESS);
     setModel("");
-    setMcpEntries([]);
-    setNextKey(0);
+    setWorkspaceMode("write");
+    setBuiltins(["web_search", "web_fetch"]);
+    setSaving(false);
+    setError(null);
   }
 
   function handleOpenChange(next: boolean) {
+    if (saving) return;
     if (!next) reset();
     onOpenChange(next);
   }
 
-  function addMCPServer() {
-    setMcpEntries((prev) => [...prev, emptyMCPEntry(nextKey)]);
-    setNextKey((k) => k + 1);
+  function toggleBuiltin(id: string, enabled: boolean) {
+    setBuiltins((current) =>
+      enabled ? [...new Set([...current, id])] : current.filter((item) => item !== id),
+    );
   }
 
-  function removeMCPServer(key: number) {
-    setMcpEntries((prev) => prev.filter((e) => e.key !== key));
-  }
-
-  function updateMCPEntry(key: number, patch: Partial<MCPFormEntry>) {
-    setMcpEntries((prev) => prev.map((e) => (e.key === key ? { ...e, ...patch } : e)));
-  }
-
-  function handleSubmit() {
+  async function handleSubmit() {
     const trimmedName = name.trim();
-    if (!trimmedName) return;
-
-    onCreate({
-      name: trimmedName,
-      description: description.trim() || undefined,
-      instructions: instructions.trim() || undefined,
-      harness,
-      model: model.trim(),
-      mcpServers: toMCPInputs(mcpEntries),
-    });
-    reset();
-    onOpenChange(false);
+    if (!trimmedName || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onCreate({ ...input, name: trimmedName });
+      reset();
+      onOpenChange(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setSaving(false);
+    }
   }
 
-  const canSubmit = name.trim().length > 0 && model.trim().length > 0;
+  const canSubmit = name.trim().length > 0 && !saving;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         data-testid="create-agent-dialog"
-        className="flex max-h-[85vh] flex-col gap-4 sm:max-w-lg"
+        className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl"
       >
-        <DialogHeader>
-          <DialogTitle>Create custom agent</DialogTitle>
+        <DialogHeader className="border-b border-border px-6 py-5">
+          <div className="flex items-start justify-between gap-4 pr-8">
+            <div>
+              <DialogTitle>Create an agent</DialogTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Save it once, then use it in any project. OmniSci generates the YAML bundle.
+              </p>
+            </div>
+            <Badge variant="outline" className="shrink-0 gap-1.5 font-normal">
+              <ServerCogIcon className="size-3" />
+              App resource
+            </Badge>
+          </div>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
-          {/* Name */}
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="create-agent-name"
-              className="text-xs font-medium text-muted-foreground"
+        <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
+          <div className="min-h-0 overflow-y-auto px-6 py-5">
+            <FormSection number="01" title="Identity" description="What this agent is for.">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Name" required htmlFor="create-agent-name">
+                  <Input
+                    id="create-agent-name"
+                    data-testid="create-agent-name"
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="literature-reviewer"
+                    autoFocus
+                  />
+                </Field>
+                <Field label="Description" htmlFor="create-agent-description">
+                  <Input
+                    id="create-agent-description"
+                    data-testid="create-agent-description"
+                    value={description}
+                    onChange={(event) => setDescription(event.target.value)}
+                    placeholder="Reviews evidence and methods"
+                  />
+                </Field>
+              </div>
+            </FormSection>
+
+            <FormSection
+              number="02"
+              title="Runtime"
+              description="Defaults can still be overridden when a session starts."
             >
-              Name <span className="text-destructive">*</span>
-            </label>
-            <Input
-              id="create-agent-name"
-              data-testid="create-agent-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="my-agent"
-              autoFocus
-            />
-          </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Harness" required>
+                  <Select value={harness} onValueChange={setHarness}>
+                    <SelectTrigger data-testid="create-agent-harness" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {harnessOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Model" htmlFor="create-agent-model">
+                  <Input
+                    id="create-agent-model"
+                    data-testid="create-agent-model"
+                    value={model}
+                    onChange={(event) => setModel(event.target.value)}
+                    placeholder="Use harness default"
+                  />
+                  <span className="font-normal text-muted-foreground">
+                    Leave blank to keep this agent portable across harnesses.
+                  </span>
+                </Field>
+              </div>
+            </FormSection>
 
-          {/* Description */}
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="create-agent-description"
-              className="text-xs font-medium text-muted-foreground"
+            <FormSection
+              number="03"
+              title="Capabilities"
+              description="Grant only what this role needs. Credentials stay outside the agent."
             >
-              Description
-            </label>
-            <Input
-              id="create-agent-description"
-              data-testid="create-agent-description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="A short summary of what this agent does"
-            />
-          </div>
+              <div className="overflow-hidden rounded-xl border border-border">
+                <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                    <TerminalSquareIcon className="size-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">Workspace & host CLIs</p>
+                    <p className="text-xs text-muted-foreground">
+                      Read project files and run commands on the selected execution host.
+                    </p>
+                  </div>
+                  <Select
+                    value={workspaceMode}
+                    onValueChange={(value) => setWorkspaceMode(value as WorkspaceAccessMode)}
+                  >
+                    <SelectTrigger
+                      aria-label="Workspace access"
+                      data-testid="create-agent-workspace-mode"
+                      className="w-44"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="write">Author outputs</SelectItem>
+                      <SelectItem value="read">Read only</SelectItem>
+                      <SelectItem value="none">Off</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {BUILTIN_CAPABILITIES.map((capability) => {
+                  const Icon = capability.icon;
+                  const enabled = builtins.includes(capability.id);
+                  return (
+                    <div
+                      key={capability.id}
+                      className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+                    >
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                        <Icon className="size-4" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">{capability.label}</p>
+                        <p className="text-xs text-muted-foreground">{capability.description}</p>
+                      </div>
+                      <Switch
+                        aria-label={`Enable ${capability.label}`}
+                        checked={enabled}
+                        onCheckedChange={(checked) => toggleBuiltin(capability.id, checked)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
 
-          {/* Harness */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              Harness <span className="text-destructive">*</span>
-            </label>
-            <Select value={harness} onValueChange={setHarness}>
-              <SelectTrigger data-testid="create-agent-harness" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {harnessOptions.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <ResourceNote
+                  icon={TerminalSquareIcon}
+                  title="Host CLIs"
+                  text={
+                    workspaceMode === "write"
+                      ? "Can write analyses, notebooks, figures, reports, results, and managed science state. Raw data stays read-only."
+                      : workspaceMode === "read"
+                        ? "Can inspect the project and run read-only commands on the selected host."
+                        : "Disabled for this agent."
+                  }
+                  badge={
+                    workspaceMode === "write"
+                      ? "Authoring"
+                      : workspaceMode === "read"
+                        ? "Read only"
+                        : "Off"
+                  }
+                />
+                <ResourceNote
+                  icon={ServerCogIcon}
+                  title="Shared connections"
+                  text="MCP and signed-in services will attach here by stable app reference."
+                  badge="Next slice"
+                />
+              </div>
+            </FormSection>
 
-          {/* Model */}
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="create-agent-model"
-              className="text-xs font-medium text-muted-foreground"
+            <FormSection
+              number="04"
+              title="Instructions"
+              description="Stored as AGENTS.md beside the generated config."
             >
-              Model <span className="text-destructive">*</span>
-            </label>
-            <Input
-              id="create-agent-model"
-              data-testid="create-agent-model"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="claude-sonnet-4-20250514"
-            />
+              <Field label="System instructions" htmlFor="create-agent-instructions">
+                <Textarea
+                  id="create-agent-instructions"
+                  data-testid="create-agent-instructions"
+                  value={instructions}
+                  onChange={(event) => setInstructions(event.target.value)}
+                  placeholder="You are a rigorous scientific reviewer. Check methods, evidence, and reproducibility…"
+                  className="min-h-36 resize-y"
+                />
+              </Field>
+            </FormSection>
           </div>
 
-          {/* Instructions / System Prompt */}
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="create-agent-instructions"
-              className="text-xs font-medium text-muted-foreground"
-            >
-              System instructions
-            </label>
-            <Textarea
-              id="create-agent-instructions"
-              data-testid="create-agent-instructions"
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              placeholder="You are a helpful assistant that..."
-              className="min-h-[120px]"
-            />
-          </div>
-
-          {/* MCP Servers */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-muted-foreground">MCP Tools</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={addMCPServer}
-                data-testid="create-agent-add-mcp"
-                className="h-6 gap-1 px-2 text-xs text-muted-foreground"
-              >
-                <PlusIcon className="size-3" />
-                Add server
-              </Button>
+          <aside className="flex min-h-0 flex-col border-t border-border bg-muted/25 lg:border-t-0 lg:border-l">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div className="flex items-center gap-2">
+                <FileCode2Icon className="size-4 text-muted-foreground" />
+                <span className="text-xs font-medium">Generated manifest</span>
+              </div>
+              <span className="font-mono text-[10px] text-muted-foreground">config.yaml</span>
             </div>
-            {mcpEntries.map((entry) => (
-              <MCPServerRow
-                key={entry.key}
-                entry={entry}
-                onChange={(patch) => updateMCPEntry(entry.key, patch)}
-                onRemove={() => removeMCPServer(entry.key)}
-              />
-            ))}
-          </div>
+            <pre
+              data-testid="create-agent-yaml-preview"
+              className="min-h-0 flex-1 overflow-auto p-4 font-mono text-[11px] leading-5 text-foreground"
+            >
+              {yaml}
+            </pre>
+            <div className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+              <p className="flex items-start gap-2">
+                <CheckIcon className="mt-0.5 size-3.5 shrink-0 text-teal-600 dark:text-teal-300" />
+                YAML remains portable and can be exported or edited directly later.
+              </p>
+            </div>
+          </aside>
         </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => handleOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button data-testid="create-agent-submit" onClick={handleSubmit} disabled={!canSubmit}>
-            Create
-          </Button>
+        <DialogFooter className="border-t border-border px-6 py-4 sm:justify-between">
+          <div className="min-w-0 flex-1">
+            {error && (
+              <p className="flex items-center gap-1.5 text-xs text-destructive" role="alert">
+                <CircleAlertIcon className="size-3.5 shrink-0" />
+                <span className="truncate">{error}</span>
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" onClick={() => handleOpenChange(false)} disabled={saving}>
+              Cancel
+            </Button>
+            <Button
+              data-testid="create-agent-submit"
+              onClick={() => void handleSubmit()}
+              disabled={!canSubmit}
+              className="min-w-28"
+            >
+              {saving ? <Loader2Icon className="size-4 animate-spin" /> : "Save agent"}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-/** A single MCP server entry in the form. */
-function MCPServerRow({
-  entry,
-  onChange,
-  onRemove,
+function FormSection({
+  number,
+  title,
+  description,
+  children,
 }: {
-  entry: MCPFormEntry;
-  onChange: (patch: Partial<MCPFormEntry>) => void;
-  onRemove: () => void;
+  number: string;
+  title: string;
+  description: string;
+  children: ReactNode;
 }) {
   return (
-    <div
-      className="flex flex-col gap-2 rounded-md border border-border p-3"
-      data-testid="create-agent-mcp-entry"
-    >
-      <div className="flex items-center gap-2">
-        <Input
-          data-testid="create-agent-mcp-name"
-          value={entry.name}
-          onChange={(e) => onChange({ name: e.target.value })}
-          placeholder="server-name"
-          className="flex-1"
-        />
-        <Select
-          value={entry.transport}
-          onValueChange={(v: "http" | "stdio") => onChange({ transport: v })}
-        >
-          <SelectTrigger data-testid="create-agent-mcp-transport" className="w-24">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="stdio">stdio</SelectItem>
-            <SelectItem value="http">http</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={onRemove}
-          data-testid="create-agent-mcp-remove"
-          className="size-7 text-muted-foreground hover:text-destructive"
-        >
-          <TrashIcon className="size-3.5" />
-        </Button>
+    <section className="border-b border-border py-5 first:pt-0 last:border-b-0 last:pb-0">
+      <div className="mb-3 flex items-start gap-3">
+        <span className="pt-0.5 font-mono text-[10px] text-muted-foreground">{number}</span>
+        <div>
+          <h3 className="text-sm font-medium">{title}</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+        </div>
       </div>
+      <div className="pl-7">{children}</div>
+    </section>
+  );
+}
 
-      {entry.transport === "stdio" ? (
-        <>
-          <Input
-            data-testid="create-agent-mcp-command"
-            value={entry.command}
-            onChange={(e) => onChange({ command: e.target.value })}
-            placeholder="command (e.g. npx)"
-          />
-          <Input
-            data-testid="create-agent-mcp-args"
-            value={entry.args}
-            onChange={(e) => onChange({ args: e.target.value })}
-            placeholder="args (e.g. -y @modelcontextprotocol/server-github)"
-          />
-          <Textarea
-            data-testid="create-agent-mcp-env"
-            value={entry.env}
-            onChange={(e) => onChange({ env: e.target.value })}
-            placeholder={"Environment variables (KEY=VALUE per line)\ne.g. GITHUB_TOKEN=ghp_..."}
-            className="min-h-[60px] font-mono text-xs"
-          />
-        </>
-      ) : (
-        <>
-          <Input
-            data-testid="create-agent-mcp-url"
-            value={entry.url}
-            onChange={(e) => onChange({ url: e.target.value })}
-            placeholder="https://mcp.example.com/sse"
-          />
-          <Textarea
-            data-testid="create-agent-mcp-headers"
-            value={entry.headers}
-            onChange={(e) => onChange({ headers: e.target.value })}
-            placeholder={"HTTP headers (one per line)\ne.g. Authorization: Bearer tok_..."}
-            className="min-h-[60px] font-mono text-xs"
-          />
-        </>
-      )}
+function Field({
+  label,
+  required = false,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  htmlFor?: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className="flex flex-col gap-1.5 text-xs font-medium" htmlFor={htmlFor}>
+      <span>
+        {label} {required && <span className="text-destructive">*</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function ResourceNote({
+  icon: Icon,
+  title,
+  text,
+  badge,
+}: {
+  icon: typeof ServerCogIcon;
+  title: string;
+  text: string;
+  badge: string;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-card p-3">
+      <div className="flex items-center gap-2">
+        <Icon className="size-4 text-muted-foreground" />
+        <p className="text-xs font-medium">{title}</p>
+        <Badge
+          variant="outline"
+          className={cn("ml-auto px-1.5 py-0 text-[9px] font-normal", {
+            "border-teal-500/30 text-teal-700 dark:text-teal-300": badge === "Automatic",
+          })}
+        >
+          {badge}
+        </Badge>
+      </div>
+      <p className="mt-2 text-xs leading-4 text-muted-foreground">{text}</p>
     </div>
   );
 }

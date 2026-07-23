@@ -94,7 +94,6 @@ function loadMainHarness({
     nativeImage: {
       createFromPath: () => ({ isEmpty: () => true }),
     },
-    nativeTheme: { shouldUseDarkColors: false, on: () => {} },
     screen: {},
     session: { defaultSession: {} },
     shell: {},
@@ -150,11 +149,7 @@ function loadMainHarness({
       ...process,
       env: {
         ...process.env,
-        // No OMNIGENT_FORCE_DEV_UPDATE_CONFIG injection: main.js now derives
-        // forceDevUpdateConfig from !app.isPackaged (always true in this
-        // harness), not an env var. The harness still controls the
-        // autoUpdater.forceDevUpdateConfig property directly (above) for tests
-        // that exercise the feed-unavailable path without calling init().
+        ...(forceDevUpdateConfig ? { OMNIGENT_FORCE_DEV_UPDATE_CONFIG: "1" } : {}),
       },
     },
     require: (specifier) => {

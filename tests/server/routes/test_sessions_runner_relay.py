@@ -562,6 +562,56 @@ async def test_relay_persists_disconnect_error_labels_on_tunnel_close() -> None:
 
 
 @pytest.mark.asyncio
+async def test_relay_does_not_overwrite_terminal_failure_on_transport_loss() -> None:
+    """A tunnel recycle after a failed turn preserves the harness error."""
+    from omnigent.runtime import session_stream
+    from omnigent.server.routes import sessions as sessions_module
+
+    sessions_module._runner_relay_tasks.clear()
+    gate = asyncio.Event()
+    fake_runner = _TunnelCloseRunnerClient(gate)
+    store = _RecordingLabelStore()
+    session_id = "4cd8f83792ac4018b097d708a28165bd"
+    terminal_error = sessions_module.ErrorDetail(
+        code="RuntimeError",
+        message="turn exceeded the 600s harness idle watchdog",
+    )
+
+    try:
+        sessions_module._session_status_cache[session_id] = "failed"
+        await sessions_module._persist_session_status_error_labels(
+            session_id,
+            terminal_error,
+            store,  # type: ignore[arg-type]
+        )
+        handle = await sessions_module._ensure_runner_relay_ready(
+            session_id,
+            "runner_terminal_failure",
+            fake_runner,  # type: ignore[arg-type]
+            conversation_store=store,  # type: ignore[arg-type]
+        )
+        assert handle is not None
+        gate.set()
+        await asyncio.wait_for(handle.task, timeout=2.0)
+
+        assert sessions_module._last_task_error_from_labels(store.labels[session_id]) == {
+            "code": "RuntimeError",
+            "message": "turn exceeded the 600s harness idle watchdog",
+        }
+        assert sessions_module._session_status_cache[session_id] == "failed"
+    finally:
+        gate.set()
+        handle = sessions_module._runner_relay_tasks.get(session_id)
+        if handle is not None and not handle.task.done():
+            handle.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
+                await asyncio.wait_for(handle.task, timeout=1.0)
+        sessions_module._runner_relay_tasks.clear()
+        sessions_module._session_status_cache.pop(session_id, None)
+        session_stream.close(session_id)
+
+
+@pytest.mark.asyncio
 async def test_runner_recovery_clears_persisted_disconnect_error_labels() -> None:
     """
     Runner recovery drops the persisted ``runner_disconnected`` labels.

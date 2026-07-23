@@ -228,7 +228,11 @@ describe("Sidebar session list", () => {
     // The same card now shows the settings nav (Back to app + sections),
     // not the conversation search/list.
     expect(screen.queryByTestId("sidebar-search-button")).toBeNull();
-    expect(screen.getByRole("link", { name: /Back to Omnigent/ })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: /Back to OmniSci/ })).toHaveAttribute("href", "/");
+    expect(screen.getByTestId("settings-nav-research")).toHaveAttribute(
+      "href",
+      "/settings/research",
+    );
     expect(screen.getByTestId("settings-nav-appearance")).toHaveAttribute(
       "href",
       "/settings/appearance",
@@ -237,6 +241,16 @@ describe("Sidebar session list", () => {
       "href",
       "/settings/archived",
     );
+  });
+
+  it("exposes Provenance as a top-level workspace", () => {
+    mockConversations(THREE_TYPE_CONVERSATIONS);
+    renderSidebar(true, "/project");
+
+    const project = screen.getByTestId("project-button");
+    expect(project).toHaveAttribute("href", "/project");
+    expect(project.className).toContain("font-semibold");
+    expect(screen.getByTestId("new-chat-button").className).not.toContain("font-semibold");
   });
 
   it("renders the footer Settings as an icon-only floating control on mobile", () => {

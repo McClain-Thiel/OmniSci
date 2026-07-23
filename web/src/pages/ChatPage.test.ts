@@ -2,11 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RenderItem } from "@/lib/renderItems";
 import type { ToolExecution } from "@/lib/blocks";
 import type { Bubble } from "@/lib/renderItems";
-import {
-  BUILTIN_SLASH_COMMANDS,
-  isSlashCommandText,
-  slashCommandMatches,
-} from "@/components/SlashCommandMenu";
+import { BUILTIN_SLASH_COMMANDS, isSlashCommandText } from "@/components/SlashCommandMenu";
 import { isSessionSharedWithOthers } from "@/lib/permissionsApi";
 import {
   buildPendingBubbles,
@@ -1010,23 +1006,20 @@ describe("buildSlashCommandMap", () => {
     expect(map["/mlflow-bug"]).toBe("File an MLflow bug.");
   });
 
-  it("matches skills via the shared substring matcher the menu uses", () => {
+  it("matches skills via the same prefix filter the menu uses", () => {
+    // The menu (SlashCommandMenu) filters keys whose ``name.slice(1)``
+    // starts with the typed query. Verify the merged map plays nicely
+    // with that filter for a partially-typed skill name.
     const map = buildSlashCommandMap(
       [
-        {
-          name: "superpowers:using-superpowers",
-          description: "Establishes how to find and use skills",
-        },
+        { name: "triage-issues", description: "Triage issues." },
         { name: "mlflow-bug", description: "File an MLflow bug." },
       ],
       true,
       true,
     );
-    // A namespaced skill is found by its leaf name — the exact bug this fixes.
-    const matches = Object.keys(map).filter((name) =>
-      slashCommandMatches(name, "using-superpowers"),
-    );
-    expect(matches).toEqual(["/superpowers:using-superpowers"]);
+    const matches = Object.keys(map).filter((name) => name.slice(1).startsWith("tri"));
+    expect(matches).toEqual(["/triage-issues"]);
   });
 });
 

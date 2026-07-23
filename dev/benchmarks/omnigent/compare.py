@@ -33,24 +33,6 @@ def _fmt_delta(v: float | None) -> str:
     return f"{sign}{v * 100:.1f}%"
 
 
-def _fmt_req(row: dict) -> str:
-    """Format a journey's requests-per-op as ``base→cand`` (or a single value).
-
-    ``—`` when neither side counted; a bare value when only one side has it
-    (a new journey, or a baseline predating request counting). A change in the
-    count means a round-trip was added or removed — a deterministic signal
-    independent of the latency deltas.
-    """
-    b, c = row.get("b_req"), row.get("c_req")
-    if b is None and c is None:
-        return "—"
-    if b is None:
-        return f"{c:.1f}"
-    if c is None:
-        return f"{b:.1f}"
-    return f"{b:.1f}" if b == c else f"{b:.1f}→{c:.1f}"
-
-
 def compare_reports(
     baseline: dict,
     candidate: dict,
@@ -78,28 +60,6 @@ def compare_reports(
         c_p50 = c_summary.get("avg_p50_ms")
         c_p95 = c_summary.get("avg_p95_ms")
 
-        # A skipped journey (or one whose runs all failed) carries no metric
-        # keys. Report it as its own status instead of computing a delta off a
-        # missing value (which would read as a spurious -100% improvement).
-        c_req = c_summary.get("avg_http_requests_per_op")
-        if c_p50 is None:
-            b_j_summary = baseline_journeys.get(name, {}).get("summary", {})
-            rows.append(
-                {
-                    "journey": name,
-                    "status": "skipped",
-                    "b_p50": b_j_summary.get("avg_p50_ms"),
-                    "c_p50": None,
-                    "b_p95": b_j_summary.get("avg_p95_ms"),
-                    "c_p95": None,
-                    "delta_p50": None,
-                    "delta_p95": None,
-                    "b_req": b_j_summary.get("avg_http_requests_per_op"),
-                    "c_req": c_req,
-                }
-            )
-            continue
-
         if name not in baseline_journeys:
             rows.append(
                 {
@@ -111,8 +71,6 @@ def compare_reports(
                     "c_p95": c_p95,
                     "delta_p50": None,
                     "delta_p95": None,
-                    "b_req": None,
-                    "c_req": c_req,
                 }
             )
             continue
@@ -130,8 +88,6 @@ def compare_reports(
                     "c_p95": c_p95,
                     "delta_p50": None,
                     "delta_p95": None,
-                    "b_req": None,
-                    "c_req": c_req,
                 }
             )
             continue
@@ -139,7 +95,6 @@ def compare_reports(
         b_summary = b_data.get("summary", {})
         b_p50 = b_summary.get("avg_p50_ms", 0.0)
         b_p95 = b_summary.get("avg_p95_ms", 0.0)
-        b_req = b_summary.get("avg_http_requests_per_op")
 
         c_p50 = c_p50 or 0.0
         c_p95 = c_p95 or 0.0
@@ -160,8 +115,6 @@ def compare_reports(
                 "b_p95": b_p95,
                 "c_p95": c_p95,
                 "delta_p95": delta_p95,
-                "b_req": b_req,
-                "c_req": c_req,
             }
         )
 
@@ -169,7 +122,7 @@ def compare_reports(
 
 
 def _status_style(status: str) -> str:
-    return {"regression": "red", "new": "cyan", "ok": "green", "skipped": "yellow"}.get(status, "")
+    return {"regression": "red", "new": "cyan", "ok": "green"}.get(status, "")
 
 
 def print_table(rows: list[dict], threshold: float) -> None:
@@ -190,7 +143,6 @@ def print_table(rows: list[dict], threshold: float) -> None:
     table.add_column("Base P95 ms", justify="right")
     table.add_column("Cand P95 ms", justify="right")
     table.add_column("Δ P95", justify="right")
-    table.add_column("Req/op", justify="right")
 
     for row in rows:
         style = _status_style(row["status"])
@@ -212,7 +164,6 @@ def print_table(rows: list[dict], threshold: float) -> None:
             _fmt_ms(row["b_p95"]),
             _fmt_ms(row["c_p95"]),
             delta_p95_str,
-            _fmt_req(row),
         )
 
     console.print()
@@ -228,13 +179,13 @@ def build_markdown(rows: list[dict], threshold: float, passed: bool) -> str:
         f"Regression threshold: **{threshold * 100:.0f}%** on avg P50 or avg P95.",
         "",
         "| Journey | Status | Base P50 ms | Cand P50 ms | Δ P50"
-        " | Base P95 ms | Cand P95 ms | Δ P95 | Req/op |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        " | Base P95 ms | Cand P95 ms | Δ P95 |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
 
     for row in rows:
         status = row["status"]
-        emoji = {"regression": "🔴", "new": "🆕", "ok": "✅", "skipped": "⚠️"}.get(status, status)
+        emoji = {"regression": "🔴", "new": "🆕", "ok": "✅"}.get(status, status)
         b_p50 = _fmt_ms(row["b_p50"])
         c_p50 = _fmt_ms(row["c_p50"])
         d_p50 = _fmt_delta(row["delta_p50"])
@@ -244,7 +195,7 @@ def build_markdown(rows: list[dict], threshold: float, passed: bool) -> str:
         lines.append(
             f"| {row['journey']} | {emoji} {status} "
             f"| {b_p50} | {c_p50} | {d_p50} "
-            f"| {b_p95} | {c_p95} | {d_p95} | {_fmt_req(row)} |"
+            f"| {b_p95} | {c_p95} | {d_p95} |"
         )
 
     lines.append("")
@@ -301,15 +252,10 @@ def main(argv: list[str] | None = None) -> int:
 
     regressions = [r for r in rows if r["status"] == "regression"]
     new_journeys = [r for r in rows if r["status"] == "new"]
-    skipped = [r for r in rows if r["status"] == "skipped"]
 
     if new_journeys:
         names = ", ".join(r["journey"] for r in new_journeys)
         console.print(f"[cyan]New journeys (no baseline):[/cyan] {names}")
-
-    if skipped:
-        names = ", ".join(r["journey"] for r in skipped)
-        console.print(f"[yellow]Skipped (no candidate metrics):[/yellow] {names}")
 
     if regressions:
         console.print(

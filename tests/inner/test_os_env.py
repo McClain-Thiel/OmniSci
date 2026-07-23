@@ -10,6 +10,7 @@ import tracemalloc
 from pathlib import Path
 
 import pytest
+import yaml
 
 from omnigent.inner.datamodel import OSEnvSandboxSpec, OSEnvSpec
 from omnigent.inner.os_env import (
@@ -17,6 +18,8 @@ from omnigent.inner.os_env import (
     _project_root,
     _read_impl,
     _shell_impl,
+    _stage_science_infrastructure_config,
+    _with_runtime_bin_on_path,
     build_helper_env,
     create_os_environment,
 )
@@ -122,6 +125,66 @@ def test_build_helper_env_active_passes_omnigent_session_marker() -> None:
     env = build_helper_env(parent, _active_policy())
 
     assert env[OMNIGENT_SESSION_ENV_VAR] == OMNIGENT_SESSION_ENV_VALUE
+
+
+def test_runtime_bin_is_appended_for_agent_console_scripts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("omnigent.inner.os_env.sys.executable", "/opt/omnisci/.venv/bin/python")
+
+    env = _with_runtime_bin_on_path({"PATH": "/usr/local/bin:/usr/bin"})
+
+    assert env["PATH"].split(os.pathsep) == [
+        "/usr/local/bin",
+        "/usr/bin",
+        "/opt/omnisci/.venv/bin",
+    ]
+
+
+def test_runtime_bin_is_not_duplicated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("omnigent.inner.os_env.sys.executable", "/opt/omnisci/.venv/bin/python")
+
+    env = _with_runtime_bin_on_path({"PATH": "/opt/omnisci/.venv/bin:/usr/bin"})
+
+    assert env["PATH"] == "/opt/omnisci/.venv/bin:/usr/bin"
+
+
+def test_science_infrastructure_is_staged_in_private_tmpdir(tmp_path: Path) -> None:
+    source = tmp_path / "host-infrastructure.yaml"
+    source.write_text(
+        """\
+version: 1
+compute_config:
+  default_provider: cluster
+  providers:
+    cluster:
+      type: ssh
+      host: example.invalid
+storage_config:
+  default_provider: local
+  allowed_roots: []
+  providers: {}
+""",
+        encoding="utf-8",
+    )
+    helper_tmpdir = tmp_path / "helper"
+    helper_tmpdir.mkdir()
+    env: dict[str, str] = {}
+
+    _stage_science_infrastructure_config(
+        env,
+        helper_tmpdir,
+        {"OMNISCI_INFRASTRUCTURE_CONFIG": str(source)},
+    )
+
+    staged = Path(env["OMNISCI_INFRASTRUCTURE_CONFIG"])
+    assert staged.parent == helper_tmpdir
+    assert staged != source
+    assert staged.stat().st_mode & 0o777 == 0o600
+    assert (
+        yaml.safe_load(staged.read_text(encoding="utf-8"))["compute_config"]["default_provider"]
+        == "cluster"
+    )
 
 
 # ---------------------------------------------------------------------------

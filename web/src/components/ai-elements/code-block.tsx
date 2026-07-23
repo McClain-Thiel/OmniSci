@@ -23,6 +23,7 @@ import {
   useState,
 } from "react";
 import type { BundledLanguage, BundledTheme, HighlighterGeneric, ThemedToken } from "shiki";
+import { createHighlighter } from "shiki";
 
 // Shiki uses bitflags for font styles: 1=italic, 2=bold, 4=underline
 // oxlint-disable-next-line eslint(no-bitwise)
@@ -148,14 +149,10 @@ const getHighlighter = (
     return cached;
   }
 
-  // Import Shiki's engine lazily so its core (incl. the WASM regex engine)
-  // stays out of the main bundle and only loads when a code block renders.
-  const highlighterPromise = import("shiki").then(({ createHighlighter }) =>
-    createHighlighter({
-      langs: [language],
-      themes: ["github-light", "github-dark"],
-    }),
-  );
+  const highlighterPromise = createHighlighter({
+    langs: [language],
+    themes: ["github-light", "github-dark"],
+  });
 
   highlighterCache.set(language, highlighterPromise);
   return highlighterPromise;

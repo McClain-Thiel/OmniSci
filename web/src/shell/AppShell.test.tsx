@@ -154,6 +154,21 @@ vi.mock("./SubagentsPanel", () => ({
 vi.mock("./TodoPanel", () => ({
   TodoPanel: () => <div data-testid="todo-panel" />,
 }));
+vi.mock("@/components/science/SciencePanel", () => ({
+  SciencePanel: ({
+    conversationId,
+    projectDir,
+  }: {
+    conversationId: string;
+    projectDir: string | null;
+  }) => (
+    <div
+      data-testid="science-panel"
+      data-conversation-id={conversationId}
+      data-project-dir={projectDir ?? ""}
+    />
+  ),
+}));
 vi.mock("./FilesPanelDrawer", () => ({
   FilesPanelDrawer: ({ open, flatView }: { open: boolean; flatView: boolean }) => (
     <div
@@ -320,7 +335,7 @@ function serverInfo(overrides: Partial<ServerInfo> = {}): ServerInfo {
     public_sharing_enabled: true,
     server_version: null,
     smart_routing_enabled: false,
-    dictation_available: false,
+    science_enabled: false,
     ...overrides,
   };
 }
@@ -2680,6 +2695,27 @@ describe("Mobile session menu", () => {
     expect(screen.getByTestId("todo-panel")).toBeInTheDocument();
   });
 
+  it("opens the Provenance drawer when the server advertises the workbench", () => {
+    useEnvironmentMock.mockReturnValue({
+      data: { available: true, root: null },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useWorkspaceEnvironment>);
+    mockConversations([{ id: "conv_science", permission_level: null }]);
+
+    renderShell("/c/conv_science", serverInfo({ science_enabled: true }));
+
+    expect(screen.getByTestId("science-panel-drawer")).toHaveAttribute("data-state", "closed");
+    openSessionMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Provenance$/i }));
+
+    const drawer = screen.getByTestId("science-panel-drawer");
+    expect(drawer).toHaveAttribute("data-state", "open");
+    expect(within(drawer).getByTestId("science-panel")).toHaveAttribute(
+      "data-conversation-id",
+      "conv_science",
+    );
+  });
+
   it("keeps the FAB with only the Agents entry for a minimal agent", () => {
     // available:false → no files; no shells, no todos, no debug. The
     // Agents entry is unconditional (badge = 1, the main agent), so the
@@ -2830,7 +2866,7 @@ describe("AppShell share action", () => {
       expect(shareButton).toBeDisabled();
       expect(shareButton).toHaveAttribute(
         "title",
-        "Sharing has been disabled for this Omnigent server.",
+        "Sharing has been disabled for this OmniSci server.",
       );
     });
   });

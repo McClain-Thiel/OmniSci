@@ -22,6 +22,7 @@ export const BUILTIN_AGENTS = new Set([
   "goose-native-ui", // Goose
   "qwen-native-ui", // Qwen Code
   "kimi-native-ui", // Kimi
+  "science",
   "polly",
   "debby",
 ]);
@@ -31,6 +32,7 @@ export const BUILTIN_AGENTS = new Set([
 // desc), so pin the order users expect; any agent not listed here falls
 // after, in server order.
 export const AGENT_DISPLAY_ORDER = [
+  "Science",
   "Claude Code",
   "Codex",
   "OpenCode",
@@ -59,6 +61,7 @@ function displayRank(name: string): number {
 export function sortAgentsForDisplay<T extends AvailableAgent>(agents: readonly T[]): T[] {
   return [...agents].sort(
     (a, b) =>
+      Number(b.name === "science") - Number(a.name === "science") ||
       nativeAgentSortRank(a) - nativeAgentSortRank(b) ||
       displayRank(a.display_name) - displayRank(b.display_name),
   );

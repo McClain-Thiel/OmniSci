@@ -190,9 +190,9 @@ def create_runner_tunnel_router(
         instead of polling to a timeout. ``None`` (e.g. minimal test
         wiring, or a server without host support) omits the field.
     :param resolve_managed_runner_owner: Optional ``runner_id -> owner``
-        resolver for host-launched and managed-sandbox runners. A delegated
-        runner authenticates with a binding token (not a user session), so
-        ``auth_provider.get_user_id`` cannot resolve it;
+        resolver for server-managed sandbox runners. A managed runner
+        authenticates with a server-minted binding token (not a user
+        session), so ``auth_provider.get_user_id`` cannot resolve it;
         this looks up the owner the server recorded for the runner at
         launch (the conversation bound to ``runner_id``) — the
         runner-side analog of the host tunnel's ``resolve_launch_token``.
@@ -284,10 +284,10 @@ def create_runner_tunnel_router(
 
     @router.post("/runners/{runner_id}/token")
     async def mint_runner_owner_token(request: Request, runner_id: str) -> dict[str, str | int]:
-        """Mint a short-lived owner bearer for a delegated runner.
+        """Mint a short-lived owner bearer for a managed-sandbox runner.
 
-        A host-launched or managed-sandbox runner does not inherit the host
-        user's credential; it presents its server-minted tunnel binding token
+        A managed sandbox runner has no user credential of its own; it
+        presents its server-minted tunnel binding token
         (``X-Omnigent-Runner-Tunnel-Token``) and the server returns a
         short-lived owner JWT the runner then uses on its HTTP callbacks
         (which gate on ``require_user``). This is the HTTP analog of the
@@ -299,7 +299,8 @@ def create_runner_tunnel_router(
         The binding-token match is required unconditionally — the
         allow-list shortcut honored on some other runner-token checks is
         deliberately NOT accepted here, because this endpoint issues a
-        full owner credential and delegated runners are token-bound.
+        full owner credential and managed sandboxes always run
+        token-bound (no allow-list).
 
         :param request: The incoming FastAPI request (carries the binding
             token header).
@@ -314,7 +315,7 @@ def create_runner_tunnel_router(
             # No auth configured: the runner authenticates by binding
             # token alone and needs no bearer — minting is meaningless.
             raise OmnigentError(
-                "runner token minting requires an auth provider",
+                "managed-runner token minting requires an auth provider",
                 code=ErrorCode.INVALID_INPUT,
             )
         token = (request.headers.get(RUNNER_TUNNEL_TOKEN_HEADER) or "").strip()
@@ -333,7 +334,7 @@ def create_runner_tunnel_router(
             # oidc/accounts mint; header/proxy mode can't (identity is
             # asserted upstream). Signal clearly rather than 401.
             raise OmnigentError(
-                "runner token minting is unsupported in this auth mode",
+                "managed-runner token minting is unsupported in this auth mode",
                 code=ErrorCode.INVALID_INPUT,
             )
         return {

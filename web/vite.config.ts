@@ -134,9 +134,9 @@ const proxyConfig = createProxyConfig(OMNIGENT_URL, useAuth);
 // treating reinstalls/updates as the same app.
 const PWA_MANIFEST = {
   id: "/",
-  name: "Omnigent",
-  short_name: "Omnigent",
-  description: "Omnigent — a common layer over coding agents.",
+  name: "OmniSci",
+  short_name: "OmniSci",
+  description: "OmniSci — a scientific research workspace built on agentic tools.",
   start_url: "/",
   scope: "/",
   display: "standalone",

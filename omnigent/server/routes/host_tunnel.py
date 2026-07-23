@@ -32,7 +32,6 @@ from omnigent.host.frames import (
     HostFsResultFrame,
     HostHarnessReadinessFrame,
     HostHelloFrame,
-    HostInstallHarnessResultFrame,
     HostLaunchRunnerResultFrame,
     HostListDirResultFrame,
     HostListWorktreesResultFrame,
@@ -161,16 +160,14 @@ def create_host_tunnel_router(
             # presented, it must resolve — never fall through to user auth
             # (a peer that chose this header has no user identity to fall
             # back on, and falling back would let a junk token downgrade
-            # into header/anonymous auth). The token is resolved against
-            # THIS path's host_id, so presenting it for any other path
-            # fails closed — a leaked token cannot register arbitrary hosts.
-            managed = await asyncio.to_thread(
-                host_store.resolve_launch_token, host_id, managed_token
-            )
-            if managed is None:
+            # into header/anonymous auth). The token is scoped to one
+            # host_id; presenting it for any other path fails closed so a
+            # leaked token cannot register arbitrary hosts.
+            managed = await asyncio.to_thread(host_store.resolve_launch_token, managed_token)
+            if managed is None or managed.host_id != host_id:
                 await ws.close(code=4004, reason="unauthenticated")
                 return
-            tunnel_owner = managed.user_id
+            tunnel_owner = managed.owner
         elif auth_provider is not None:
             tunnel_owner = auth_provider.get_user_id(ws)
             if tunnel_owner is None:
@@ -197,14 +194,14 @@ def create_host_tunnel_router(
         # the backstop for the connect/connect race this can't lock.
         if not allow_host_id_reown:
             existing = await asyncio.to_thread(host_store.get_host, host_id)
-            if existing is not None and existing.user_id != tunnel_owner:
+            if existing is not None and existing.owner != tunnel_owner:
                 _logger.warning(
                     "Refusing host %s: registered to owner %r but the "
                     "connecting peer authenticated as %r. Cross-owner "
                     "re-registration is not allowed — remove the stale "
                     "registration or reset the host id.",
                     host_id,
-                    existing.user_id,
+                    existing.owner,
                     tunnel_owner,
                 )
                 # Don't name the existing owner to this peer: in a multi-user
@@ -247,7 +244,7 @@ def create_host_tunnel_router(
                 host_store.upsert_on_connect,
                 host_id=host_id,
                 name=frame.name,
-                user_id=tunnel_owner,
+                owner=tunnel_owner,
                 allow_host_id_reown=allow_host_id_reown,
                 configured_harnesses=frame.configured_harnesses,
             )
@@ -603,18 +600,6 @@ async def _receive_loop(
                     {
                         "status": frame.status,
                         "path": frame.path,
-                        "error": frame.error,
-                    }
-                )
-            continue
-
-        if isinstance(frame, HostInstallHarnessResultFrame):
-            install_future = conn.pending_installs.pop(frame.request_id, None)
-            if install_future is not None and not install_future.done():
-                install_future.set_result(
-                    {
-                        "status": frame.status,
-                        "configured_harnesses": frame.configured_harnesses,
                         "error": frame.error,
                     }
                 )

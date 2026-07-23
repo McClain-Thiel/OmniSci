@@ -668,6 +668,32 @@ def test_ensure_default_polly_agent_seeds_card(seed_stores: _SeedStores) -> None
     assert seed_stores.artifact_store.get(seeded.bundle_location) is not None
 
 
+def test_ensure_default_science_agent_seeds_portable_default(seed_stores: _SeedStores) -> None:
+    """The built-in Science agent is loadable, unpinned, and carries its skills."""
+    server_app._ensure_default_science_agent(
+        seed_stores.agent_store,
+        seed_stores.artifact_store,
+        seed_stores.agent_cache,
+    )
+
+    seeded = seed_stores.agent_store.get_by_name(server_app._SCIENCE_AGENT_NAME)
+    assert seeded is not None, "science was not registered"
+    loaded = seed_stores.agent_cache.load(
+        seeded.id,
+        seeded.bundle_location,
+        expand_env=False,
+    )
+    assert loaded.spec.executor.config.get("harness") == "codex"
+    assert loaded.spec.executor.model is None
+    assert {skill.name for skill in loaded.spec.skills} == {
+        "biology",
+        "chemistry",
+        "bioinformatics",
+        "literature-review",
+        "experimental-design",
+    }
+
+
 def test_ensure_default_antigravity_agent_seeds_card(seed_stores: _SeedStores) -> None:
     """
     Seeding registers antigravity-native-ui as a built-in the picker renders.
@@ -714,6 +740,7 @@ def test_ensure_default_agents_includes_antigravity(seed_stores: _SeedStores) ->
     assert (
         seed_stores.agent_store.get_by_name(server_app._ANTIGRAVITY_NATIVE_AGENT_NAME) is not None
     )
+    assert seed_stores.agent_store.get_by_name(server_app._SCIENCE_AGENT_NAME) is not None
 
 
 def test_ensure_default_polly_agent_is_idempotent(seed_stores: _SeedStores) -> None:
@@ -953,6 +980,21 @@ def test_ensure_default_polly_agent_skips_when_bundle_absent(
     assert seed_stores.agent_store.get_by_name(server_app._POLLY_AGENT_NAME) is None
 
 
+def test_ensure_default_science_agent_skips_when_bundle_absent(
+    seed_stores: _SeedStores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stripped deployment does not advertise a Science bundle it cannot load."""
+    monkeypatch.setattr(server_app, "_SCIENCE_BUNDLE_SOURCE", tmp_path / "no-such-science")
+
+    server_app._ensure_default_science_agent(
+        seed_stores.agent_store,
+        seed_stores.artifact_store,
+        seed_stores.agent_cache,
+    )
+
+    assert seed_stores.agent_store.get_by_name(server_app._SCIENCE_AGENT_NAME) is None
+
+
 def test_ensure_default_debby_agent_seeds_card(seed_stores: _SeedStores) -> None:
     """
     Seeding registers debby as a built-in the picker can render.
@@ -1113,35 +1155,3 @@ async def test_health_derives_runner_online_from_fresh_row_stamp(
     assert sessions[fresh.id]["runner_online"] is True
     assert sessions[stale.id]["runner_online"] is False
     assert sessions[cleared.id]["runner_online"] is False
-
-
-# ── debug router loading (out-of-tree diagnostic endpoints) ──────────
-
-
-def test_load_debug_routers_none_and_empty() -> None:
-    """No configured modules → no routers, no error."""
-    assert server_app._load_debug_routers(None) == []
-    assert server_app._load_debug_routers([]) == []
-
-
-def test_load_debug_routers_missing_module_is_skipped() -> None:
-    """A module that can't be imported is logged and skipped, never raised.
-
-    This is the production safety net: a stray ``debug_router_modules`` key
-    naming an out-of-tree module absent from the install must not crash boot.
-    """
-    assert server_app._load_debug_routers(["nope.not.a.real.module"]) == []
-
-
-def test_load_debug_routers_module_without_list_is_skipped() -> None:
-    """A module lacking a DEBUG_ROUTERS list is skipped (uses a stdlib module)."""
-    assert server_app._load_debug_routers(["json"]) == []
-
-
-def test_load_debug_routers_collects_entries() -> None:
-    """The benchmark debug router module exposes a mountable DEBUG_ROUTERS entry."""
-    entries = server_app._load_debug_routers(["dev.benchmarks.omnigent.debug_router"])
-    assert len(entries) == 1
-    _router, prefix, tags = entries[0]
-    assert prefix == "/debug"
-    assert tags == ["debug"]

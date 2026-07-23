@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any, TypeAlias, cast
 from urllib.parse import urlparse, urlunparse
 
+import yaml
+
 from omnigent._platform import IS_WINDOWS, WINDOWS_ENV_PASSTHROUGH
 from omnigent.runner.identity import (
     OMNIGENT_SESSION_ENV_VAR,
@@ -36,6 +38,7 @@ from .datamodel import CredentialProxySpec, OSEnvSpec
 from .sandbox import (
     ContainmentHandle,
     SandboxPolicy,
+    _framework_package_roots,
     activate_sandbox,
     cleanup_private_tmpdir,
     create_private_tmpdir,
@@ -227,6 +230,48 @@ def build_helper_env(
     return strip_runner_auth_secrets(env)
 
 
+def _with_runtime_bin_on_path(env: Mapping[str, str]) -> dict[str, str]:
+    """Expose console scripts installed beside the running OmniSci executable."""
+    updated = dict(env)
+    runtime_bin = str(Path(sys.executable).parent)
+    path_entries = [entry for entry in updated.get("PATH", "").split(os.pathsep) if entry]
+    normalized_runtime = os.path.normcase(os.path.abspath(runtime_bin))
+    if not any(
+        os.path.normcase(os.path.abspath(entry)) == normalized_runtime for entry in path_entries
+    ):
+        # Keep the user's interpreter/tool selections ahead of the app venv.
+        # The runtime bin is a fallback for bundled commands such as `science`.
+        path_entries.append(runtime_bin)
+    updated["PATH"] = os.pathsep.join(path_entries)
+    return updated
+
+
+def _stage_science_infrastructure_config(
+    env: dict[str, str],
+    tmpdir: Path,
+    parent_env: Mapping[str, str],
+) -> None:
+    """Stage validated app-level connector metadata inside the helper sandbox."""
+    try:
+        from omnisci.infrastructure import CONFIG_ENV_VAR, InfrastructureConfigStore
+    except ModuleNotFoundError:
+        return
+
+    configured_path = parent_env.get(CONFIG_ENV_VAR)
+    store = InfrastructureConfigStore(configured_path)
+    if not store.path.is_file():
+        return
+
+    config = store.load()
+    staged_path = tmpdir / "omnisci-infrastructure.yaml"
+    staged_path.write_text(
+        yaml.safe_dump(config, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    staged_path.chmod(0o600)
+    env[CONFIG_ENV_VAR] = str(staged_path)
+
+
 def _build_credential_proxy_parent_env(
     *,
     helper_env: Mapping[str, str],
@@ -406,7 +451,7 @@ class _HelperProcessClient:
 
     def _start_locked(self) -> None:
         sandbox = self.sandbox
-        env = build_helper_env(os.environ, sandbox)
+        env = _with_runtime_bin_on_path(build_helper_env(os.environ, sandbox))
         project_root = str(_project_root())
         existing_pythonpath = env.get("PYTHONPATH")
         env["PYTHONPATH"] = (
@@ -421,6 +466,7 @@ class _HelperProcessClient:
             self._tmpdir = create_private_tmpdir()
             sandbox = with_additional_write_roots(sandbox, [self._tmpdir])
             set_temp_env(env, self._tmpdir)
+            _stage_science_infrastructure_config(env, self._tmpdir, os.environ)
             if self.start_in_scratch:
                 helper_cwd = self._tmpdir
                 env["PWD"] = str(self._tmpdir)
@@ -526,9 +572,19 @@ class _HelperProcessClient:
         # in resolve_sandbox without going through the registry).
         if sandbox.active:
             backend = get_backend(sandbox.backend_type)
+            project_root_path = Path(project_root).resolve(strict=False)
+            wrap_read_roots = list(sandbox.read_roots or [])
+            for package_root in _framework_package_roots(project_root_path):
+                if package_root not in wrap_read_roots:
+                    wrap_read_roots.append(package_root)
+            # Bootstrap visibility belongs only to the OS profile. The
+            # serialized helper policy above keeps the user's original
+            # read grants, so sys_os_* cannot treat framework source as
+            # an agent-readable path outside the workspace.
+            wrap_sandbox = replace(sandbox, read_roots=wrap_read_roots)
             spawn_argv = backend.wrap_launcher_argv(
                 helper_argv,
-                sandbox,
+                wrap_sandbox,
                 self.cwd,
                 chdir=helper_cwd if helper_cwd != self.cwd else None,
             )

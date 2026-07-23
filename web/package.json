@@ -15,8 +15,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "build:overlay": "vite build --config vite.update-overlay.config.ts"
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -58,6 +57,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "hyparquet": "^1.26.2",
     "lucide-react": "^1.12.0",
     "monaco-editor": "^0.55.1",
     "nanoid": "^5.1.9",

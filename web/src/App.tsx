@@ -25,6 +25,9 @@ const InboxPage = lazy(() => import("@/pages/InboxPage").then((m) => ({ default:
 const SettingsPage = lazy(() =>
   import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
+const ProjectPage = lazy(() =>
+  import("@/pages/ProjectPage").then((m) => ({ default: m.ProjectPage })),
+);
 
 interface AppProps {
   /**
@@ -119,6 +122,7 @@ function App({ basename }: AppProps = {}) {
           <Route path={prefix || "/"} element={<ChatPage />} />
           <Route path={`${prefix}/c/:conversationId`} element={<ChatPage />} />
           <Route path={`${prefix}/inbox`} element={<InboxPage />} />
+          <Route path={`${prefix}/project`} element={<ProjectPage />} />
           {/* Settings renders into the chat outlet so the conversations
               sidebar stays put — entering settings only swaps the card's
               content (the section nav) and the main area. The active section

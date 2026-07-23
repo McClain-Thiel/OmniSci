@@ -11,10 +11,8 @@
 //
 // Design notes preserved from the original inline implementation:
 //   - Updates are gated on a usable feed: a packaged build, or a dev build with
-//     `forceDevUpdateConfig` set (main.js derives it from !app.isPackaged, so
-//     dev always uses dev-app-update.yml and a packaged build can never be
-//     redirected to it). Manual actions in an unusable feed reject with a
-//     friendly dev message.
+//     `OMNIGENT_FORCE_DEV_UPDATE_CONFIG=1` (surfaced here as `forceDevUpdateConfig`).
+//     Manual actions in an unusable feed reject with a friendly dev message.
 //   - `autoDownload` is always off; downloads and installs are explicit and
 //     each privileged IPC action re-confirms with a native dialog (a cached
 //     hosting grant must not silently authorize an update action).
@@ -81,7 +79,7 @@ function isUpdateSecurityError(message) {
  *   The origin a window is pinned to (used for the consent dialog copy).
  * @param {string} deps.iconPath Absolute path to the app icon PNG.
  * @param {boolean} [deps.forceDevUpdateConfig] Force the dev feed on in an
- *   unpackaged build (main.js sets this from !app.isPackaged).
+ *   unpackaged build (from `OMNIGENT_FORCE_DEV_UPDATE_CONFIG=1`).
  * @returns {{
  *   getConfig: () => { mode: string, autoInstall: boolean, skippedVersion: string | null },
  *   setConfig: (patch?: object) => { mode: string, autoInstall: boolean, skippedVersion: string | null },
@@ -254,21 +252,6 @@ function createDesktopUpdater({
   }
 
   /**
-   * Start downloading the available update. Feed-gated like the other actions.
-   * Used by the trusted shell update overlay (the server-page IPC calls
-   * `autoUpdater.downloadUpdate()` inline behind its own consent dialog).
-   *
-   * @returns {Promise<void>}
-   */
-  function downloadUpdate() {
-    if (!canUseFeed()) {
-      reportUnavailableInDev();
-      return Promise.reject(unavailableInDevError());
-    }
-    return autoUpdater.downloadUpdate().then(() => undefined);
-  }
-
-  /**
    * Native, per-action consent for a privileged update control. The IPC gate
    * only proves the call came FROM the pinned server's page — not that the USER
    * asked for it — so download/install/config changes re-confirm here. Returns
@@ -413,7 +396,6 @@ function createDesktopUpdater({
     getStatus,
     init,
     checkForUpdates,
-    downloadUpdate,
     installUpdateNow,
     registerIpc,
     quitAndInstallIfPending,

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "omnigent"
 # Keep in sync with omnigent/version.py's VERSION constant.
-version = "0.7.0.dev0"
+version = "0.6.0"
 description = "Omnigent: declarative agent authoring and runtime framework"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -26,8 +26,8 @@ dependencies = [
     # one version, so a published `omnigent==X` must resolve the SDK wheels
     # built alongside it (release-omnigent.yml verifies these pins match the
     # release tag). Local/editable installs still resolve via tool.uv.sources.
-    "omnigent-client==0.7.0.dev0",
-    "omnigent-ui-sdk==0.7.0.dev0",
+    "omnigent-client==0.6.0",
+    "omnigent-ui-sdk==0.6.0",
     # Merged from omnigent + omnigent.
     "pyyaml>=6.0,<7",
     # openai-agents<0.18.2 omits a field required by openai>=2.45.
@@ -49,8 +49,10 @@ dependencies = [
     "psutil>=5.9,<8",
     # CEL (Common Expression Language) for inline policy evaluation.
     # Non-Turing-complete, side-effect-free, guaranteed to terminate.
-    # Pure-Python implementation; available on all platforms.
-    "cel-python>=0.5",
+    # No wheels for Linux aarch64 or macOS x86_64 (Intel); excluded so
+    # installation succeeds. The CEL policy module degrades gracefully
+    # when the library is absent.
+    'cel-expr-python>=0.1; platform_machine != "aarch64" and (sys_platform != "darwin" or platform_machine != "x86_64")',
     # OS keychain for storing model-provider API keys (OSS model
     # selection). Used by omnigent/onboarding/secrets.py; falls back to
     # a 0600 file when no keyring backend is available (e.g. headless).
@@ -131,7 +133,7 @@ vertex = ["google-auth>=2.0,<3"]
 # Modal sandbox launcher (`omnigent sandbox --provider modal`). The
 # launcher module ships in the base package and imports the SDK lazily,
 # so only users of the provider need this extra.
-modal = ["modal>=1.0,<2"]
+modal = ["modal>=1.4,<2"]
 # Daytona sandbox launcher (`omnigent sandbox --provider daytona` and
 # server-managed `sandbox.provider: daytona`).
 # Same lazy-import posture as the modal extra. Pre-1.0 SDK: pin minor.
@@ -181,22 +183,6 @@ antigravity = ["google-antigravity>=0.1,<1"]
 # extra. The wheel bundles the Copilot CLI binary it drives (~90MB), which is
 # why it is not part of the baseline install. Pin major.
 copilot = ["github-copilot-sdk>=1,<2"]
-# Server-side streaming dictation (`WS /v1/dictation/stream`,
-# designs/server-dictation.md). Local CPU speech-to-text via sherpa-onnx;
-# the engine module imports it lazily, so only servers offering dictation
-# need the extra. Models are fetched separately
-# (scripts/fetch-dictation-models.sh). sherpa-onnx-core (the native
-# onnxruntime payload) is pinned explicitly because sherpa-onnx's wheel
-# metadata declares it inconsistently across platforms — without the
-# explicit pin it is missing from uv.lock, which breaks both the hashed
-# OSV audit and aarch64 installs.
-dictation = [
-    "sherpa-onnx>=1.13,<2",
-    "sherpa-onnx-core>=1.13,<2",
-    # The engine converts PCM frames with numpy directly; declare it
-    # rather than riding whichever extra happens to pull it in.
-    "numpy>=1.24,<3",
-]
 # Cursor SDK harness (`harness: cursor`). Optional like antigravity: the
 # harness imports the cursor-sdk lazily on first turn, so only `--harness
 # cursor` users need this extra (`omnigent[cursor]`). Was a baseline dependency;
@@ -322,6 +308,18 @@ dev = [
 # `omni` ship, internal and OSS alike.)
 omnigent = "omnigent.cli:main"
 omni = "omnigent.cli:main"
+science = "omnisci.cli.main:main"
+science-mcp = "omnisci.mcp_server:main"
+
+[project.entry-points."omnigent_science.compute"]
+local = "omnisci.compute.local:LocalComputeProvider"
+modal = "omnisci.compute.modal:ModalComputeProvider"
+qsub = "omnisci.compute.scheduler:QsubComputeProvider"
+slurm = "omnisci.compute.scheduler:SlurmComputeProvider"
+ssh = "omnisci.compute.ssh:SshComputeProvider"
+
+[project.entry-points."omnigent_science.storage"]
+s3 = "omnisci.storage.s3:S3StorageProvider"
 
 # uv path-deps for the sibling SDK packages (renamed in Stage 3).
 [tool.uv.sources]
@@ -335,15 +333,16 @@ omnigent-slack = { path = "integrations/slack", editable = true }
 include-package-data = true
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = [".", "science"]
 # Discovers the `omnigent` package (including `omnigent.inner.*` and
-# all omnigent subpackages absorbed during unification).
-include = ["omnigent*"]
+# all omnigent subpackages absorbed during unification) plus the isolated
+# science project service bundled by this fork.
+include = ["omnigent*", "omnisci*"]
 
 [tool.setuptools.package-data]
 "omnigent.db" = ["alembic.ini"]
 "omnigent.db.migrations" = ["script.py.mako"]
-"omnigent.resources.examples" = ["*.yaml", "*.sh", "debby/**/*", "polly/**/*"]
+"omnigent.resources.examples" = ["*.yaml", "*.sh", "debby/**/*", "polly/**/*", "science/**/*"]
 "omnigent.resources.pi_native" = ["*.js"]
 "omnigent.resources.scripts" = ["*.sh"]
 # include UI assets in build, plus the static API-only landing page served
@@ -382,7 +381,7 @@ timeout_method = "thread"
 # with ``ModuleNotFoundError: No module named 'omnigent_client'``
 # unless the SDKs are installed editable into the venv. Listing
 # both relative paths here keeps the test suite self-contained.
-pythonpath = [".", "sdks/python-client", "sdks/ui"]
+pythonpath = [".", "science", "sdks/python-client", "sdks/ui"]
 markers = [
     "live: end-to-end tests requiring real LLM API key (run with --llm-api-key)",
     "live_app: end-to-end tests requiring a deployed Databricks App server",

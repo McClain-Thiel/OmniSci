@@ -14,16 +14,7 @@ function formatPercent(percent: number | undefined): number {
   return Math.max(0, Math.min(100, Math.round(percent)));
 }
 
-/**
- * Desktop update toast.
- *
- * `variant` controls only the outer chrome so the SAME component serves two
- * hosts: `floating` (default) pins it bottom-right for the in-page web build;
- * `bare` drops the fixed positioning so the Electron shell can mount it inside
- * its own corner overlay window (which owns position/size). See
- * web/src/update-overlay.tsx + the shell's update overlay window.
- */
-export function UpdateBanner({ variant = "floating" }: { variant?: "floating" | "bare" } = {}) {
+export function UpdateBanner() {
   const bridge = updateBridge();
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [skippedVersion, setSkippedVersion] = useState<string | null | "loading">("loading");
@@ -117,128 +108,95 @@ export function UpdateBanner({ variant = "floating" }: { variant?: "floating" | 
   const releaseNotes = visibleStatus.info?.releaseNotes;
   const progress =
     visibleStatus.state === "downloading" ? formatPercent(visibleStatus.progress?.percent) : 0;
-  const isError = visibleStatus.state === "error-security";
-  const Icon = isError
-    ? AlertTriangleIcon
-    : visibleStatus.state === "downloaded"
-      ? RotateCcwIcon
-      : DownloadIcon;
 
   return (
     <div
-      role={isError ? "status" : "region"}
+      role={visibleStatus.state === "error-security" ? "status" : "region"}
       aria-label="Desktop update"
       className={cn(
-        "rounded-xl border border-border bg-background p-3.5 text-sm shadow-lg",
-        // `floating`: pin bottom-right for the in-page web build. `bare`: fill
-        // the shell's overlay window, which supplies position + size itself.
-        variant === "floating"
-          ? "fixed right-4 bottom-4 z-50 w-80 max-w-[calc(100vw-2rem)] animate-in fade-in-0 slide-in-from-bottom-2 duration-200"
-          : "w-full",
+        "border-b border-border bg-background/95 px-4 py-2 shadow-sm backdrop-blur",
+        visibleStatus.state === "error-security" && "bg-muted/70",
       )}
     >
-      <div className="flex items-start gap-3">
-        <div
-          className={cn(
-            "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full",
-            isError
-              ? "bg-amber-500/10 text-amber-600 dark:text-amber-500"
-              : "bg-primary/10 text-primary",
-          )}
-        >
-          <Icon className="size-4" aria-hidden="true" />
-        </div>
+      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+        {visibleStatus.state === "error-security" ? (
+          <AlertTriangleIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+        ) : visibleStatus.state === "downloaded" ? (
+          <RotateCcwIcon className="size-4 text-primary" aria-hidden="true" />
+        ) : (
+          <DownloadIcon className="size-4 text-primary" aria-hidden="true" />
+        )}
 
         <div className="min-w-0 flex-1">
           {visibleStatus.state === "available" && (
-            <p className="font-medium text-foreground">
-              Omnigent {visibleStatus.info?.version ?? "update"} is available
-            </p>
+            <span>OmniSci {visibleStatus.info?.version ?? "update"} is available.</span>
           )}
           {visibleStatus.state === "downloading" && (
-            <>
-              <p className="font-medium text-foreground">
-                Downloading Omnigent update… {progress}%
-              </p>
+            <div className="flex flex-col gap-1">
+              <span>Downloading OmniSci update… {progress}%</span>
               <Progress
                 value={progress}
-                className="mt-2 h-1.5"
+                className="h-1.5 max-w-80"
                 aria-label="Update download progress"
               />
-            </>
-          )}
-          {visibleStatus.state === "downloaded" && (
-            <>
-              <p className="font-medium text-foreground">
-                Omnigent {visibleStatus.info?.version ?? "update"} is ready to install
-              </p>
-              {autoInstall && (
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Installs automatically on next quit.
-                </p>
-              )}
-            </>
-          )}
-          {isError && (
-            <>
-              <p className="font-medium text-foreground">Update check failed</p>
-              {visibleStatus.lastError && (
-                <p className="mt-0.5 line-clamp-3 text-xs text-muted-foreground">
-                  {visibleStatus.lastError}
-                </p>
-              )}
-            </>
-          )}
-
-          {releaseNotes && visibleStatus.state !== "downloading" && (
-            <details className="mt-1.5 text-xs text-muted-foreground">
-              <summary className="cursor-pointer select-none text-foreground hover:underline">
-                Release notes
-              </summary>
-              <div className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap">{releaseNotes}</div>
-            </details>
-          )}
-
-          {visibleStatus.state === "available" && (
-            <div className="mt-3 flex items-center gap-2">
-              <Button
-                size="sm"
-                onClick={() => void onDownload()}
-                loading={busyAction === "download"}
-              >
-                Update now
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void onSkip()}
-                loading={busyAction === "skip"}
-                disabled={!version}
-              >
-                Skip this version
-              </Button>
             </div>
           )}
-
           {visibleStatus.state === "downloaded" && (
-            <div className="mt-3 flex items-center gap-2">
-              <Button size="sm" onClick={() => void onInstall()} loading={busyAction === "install"}>
-                Restart to update
-              </Button>
-            </div>
+            <span>OmniSci {visibleStatus.info?.version ?? "update"} is ready to install.</span>
+          )}
+          {visibleStatus.state === "error-security" && (
+            <span>
+              Last update check failed
+              {visibleStatus.lastError ? `: ${visibleStatus.lastError}` : "."}
+            </span>
           )}
         </div>
 
-        {(isError ||
-          visibleStatus.state === "available" ||
-          visibleStatus.state === "downloaded") && (
+        {visibleStatus.state === "available" && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={() => void onDownload()} loading={busyAction === "download"}>
+              Update now
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setHiddenVersion(version)}>
+              Later
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void onSkip()}
+              loading={busyAction === "skip"}
+              disabled={!version}
+            >
+              Skip this version
+            </Button>
+          </div>
+        )}
+
+        {visibleStatus.state === "downloaded" && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={() => void onInstall()} loading={busyAction === "install"}>
+              Restart to update
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setHiddenVersion(version)}>
+              {autoInstall ? "Later — install on next quit" : "Later"}
+            </Button>
+          </div>
+        )}
+
+        {releaseNotes && visibleStatus.state !== "downloading" && (
+          <details className="basis-full text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none text-foreground">Release notes</summary>
+            <div className="mt-1 whitespace-pre-wrap">{releaseNotes}</div>
+          </details>
+        )}
+
+        {visibleStatus.state === "error-security" && (
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
-            aria-label="Dismiss"
-            className="-mt-1 -mr-1 shrink-0"
-            onClick={() => setHiddenVersion(isError ? "error-security" : (version ?? null))}
+            aria-label="Dismiss update warning"
+            onClick={() => setHiddenVersion(version ?? "error-security")}
           >
             <XIcon className="size-3.5" />
           </Button>

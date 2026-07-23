@@ -1,4 +1,4 @@
-"""Integration tests for ``GET /v1/agents`` (built-in agent discovery).
+"""Integration tests for app-level template agent routes.
 
 The endpoint is the read-only successor to the removed
 ``GET /api/agents`` list and the source the new-session picker uses to
@@ -20,6 +20,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 
+from omnigent.errors import OmnigentError
 from omnigent.runtime.agent_cache import AgentCache
 from omnigent.server.routes.builtin_agents import create_builtin_agents_router
 from omnigent.stores.agent_store.sqlalchemy_store import SqlAlchemyAgentStore
@@ -78,11 +79,12 @@ def _register_builtin_agent(
 def agents_app(
     agent_store: SqlAlchemyAgentStore,
     agent_cache: AgentCache,
+    artifact_store: LocalArtifactStore,
 ) -> FastAPI:
     """Minimal app mounting only the built-in agents router at ``/v1``."""
     app = FastAPI()
     app.include_router(
-        create_builtin_agents_router(agent_store, agent_cache),
+        create_builtin_agents_router(agent_store, agent_cache, artifact_store),
         prefix="/v1",
     )
     return app
@@ -137,6 +139,47 @@ async def test_list_builtin_agents_returns_registered_templates(
     # Same degradation for skills: an unreadable spec yields an empty
     # list, not an error and not invented entries.
     assert all(a["skills"] == [] for a in body["data"])
+
+
+async def test_create_template_agent_is_immediately_discoverable(
+    agents_client: httpx.AsyncClient,
+) -> None:
+    """The visual builder saves a durable template before a session exists."""
+    bundle = build_agent_bundle(
+        name="literature-reviewer",
+        description="Reviews scientific evidence",
+        executor={"type": "omnigent", "config": {"harness": "claude-sdk"}},
+    )
+
+    created = await agents_client.post(
+        "/v1/agents",
+        files={"bundle": ("agent.tar.gz", bundle, "application/gzip")},
+    )
+
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["name"] == "literature-reviewer"
+    assert body["description"] == "Reviews scientific evidence"
+    assert body["harness"] == "claude-sdk"
+    assert body["builtin"] is False
+
+    catalog = await agents_client.get("/v1/agents?limit=100")
+    assert any(agent["id"] == body["id"] for agent in catalog.json()["data"])
+
+
+async def test_create_template_agent_rejects_duplicate_name(
+    agents_client: httpx.AsyncClient,
+) -> None:
+    bundle = build_agent_bundle(
+        name="stable-name",
+        executor={"type": "omnigent", "config": {"harness": "claude-sdk"}},
+    )
+    files = {"bundle": ("agent.tar.gz", bundle, "application/gzip")}
+
+    first = await agents_client.post("/v1/agents", files=files)
+    assert first.status_code == 201, first.text
+    with pytest.raises(OmnigentError, match="already exists"):
+        await agents_client.post("/v1/agents", files=files)
 
 
 @pytest.mark.parametrize(

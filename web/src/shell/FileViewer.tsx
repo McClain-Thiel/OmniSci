@@ -1395,6 +1395,7 @@ function FileViewerBody({
               setSearchOpen={setSearchOpen}
               searchInputRef={searchInputRef}
               viewMode={viewMode}
+              onNavigateTo={onNavigateTo}
             />
           )}
         </div>

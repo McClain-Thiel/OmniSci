@@ -15,9 +15,8 @@ The fixtures here are the one source of truth for:
 
 - which backend is "active" on the current host
   (:func:`active_sandbox_type`),
-- how to build an :class:`OSEnvSandboxSpec` for that backend with the
-  repo root pre-added to ``read_paths`` so helper subprocesses can
-  ``import omnigent.*`` from a tempdir cwd
+- how to build an :class:`OSEnvSandboxSpec` for that backend without
+  granting the repo root as an agent-readable path
   (:func:`active_sandbox_spec_factory`),
 - how to materialise the PYTHONPATH env var the helper inherits
   (:func:`sandbox_pythonpath_env`),
@@ -107,10 +106,10 @@ def active_sandbox_spec_factory(
     Return a factory that builds an :class:`OSEnvSandboxSpec` for the
     currently parametrized backend.
 
-    The factory pre-adds the repo root to ``read_paths`` so the
-    helper subprocess can ``import omnigent.*`` from a tempdir
-    cwd. Both backends need this because they otherwise hide
-    everything outside cwd / the default system mounts.
+    The helper bootstrap grants the repo root only to the OS-level
+    launch profile. It is deliberately absent from ``read_paths`` so
+    the helper's file-tool policy does not expose framework source as
+    a user-authored read grant.
 
     Callers can override / extend the spec via keyword arguments
     (``write_paths``, ``env_passthrough``, ``egress_rules``,
@@ -119,7 +118,6 @@ def active_sandbox_spec_factory(
     :returns: A callable that returns a fresh
         :class:`OSEnvSandboxSpec` instance per invocation.
     """
-    repo_root = _repo_root_for_pythonpath()
 
     def _make(
         *,
@@ -132,9 +130,7 @@ def active_sandbox_spec_factory(
         egress_allow_private_destinations: bool = False,
         credential_proxy: CredentialProxySpec | None = None,
     ) -> OSEnvSandboxSpec:
-        read_paths = [repo_root]
-        if extra_read_paths:
-            read_paths.extend(extra_read_paths)
+        read_paths = list(extra_read_paths) if extra_read_paths else None
         return OSEnvSandboxSpec(
             type=active_sandbox_type,
             read_paths=read_paths,

@@ -1,8 +1,17 @@
-import { BotIcon, FileIcon, GlobeIcon, ListTodoIcon, TerminalIcon, XIcon } from "lucide-react";
+import {
+  BotIcon,
+  FileIcon,
+  FlaskConicalIcon,
+  GlobeIcon,
+  ListTodoIcon,
+  TerminalIcon,
+  XIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BrowserPane } from "@/components/BrowserPane/BrowserPane";
+import { SciencePanel } from "@/components/science/SciencePanel";
 import { FilesPanel } from "./FilesPanel";
 import { FileViewer } from "./FileViewer";
 import type { ChangedSort } from "./FlatFileList";
@@ -125,6 +134,8 @@ function FileTabsStrip({
 interface WorkspacePanelProps {
   /** Active session id — panels read the workspace against it. */
   conversationId: string;
+  /** Active session working directory — the automatic provenance root. */
+  projectDir: string | null;
   /** Current rail width (px), driven by the resize handle. */
   width: number;
   /** Whether the panel is closed/collapsed (hides it from keyboard nav + assistive tech). */
@@ -146,6 +157,10 @@ interface WorkspacePanelProps {
   /** Whether the Browser tab is available — Electron shell only (hidden in a
    *  plain web build, which has no embedded WebContentsView). */
   showBrowserTab: boolean;
+  /** Whether the Science tab is available — the server reports
+   *  ``science_enabled`` in ``GET /v1/info`` (the science workbench package
+   *  is importable there). */
+  showScienceTab: boolean;
   /** Count of changed files, shown as the Files tab badge. */
   changedCount: number;
   /**
@@ -224,6 +239,7 @@ interface WorkspacePanelProps {
  */
 export function WorkspacePanel({
   conversationId,
+  projectDir,
   width,
   handleProps,
   inert,
@@ -231,6 +247,7 @@ export function WorkspacePanel({
   onRightRailTabChange,
   showFilesPanel,
   showBrowserTab,
+  showScienceTab,
   changedCount,
   showShellsTab,
   terminalsLength,
@@ -375,6 +392,15 @@ export function WorkspacePanel({
                 </span>
               </TabsTrigger>
             )}
+            {showScienceTab && (
+              <TabsTrigger
+                value="science"
+                className="h-[32px] gap-[6px] rounded-[8px] px-[12px] text-[13px] leading-5"
+              >
+                <FlaskConicalIcon className="size-4" />
+                Provenance
+              </TabsTrigger>
+            )}
             {showBrowserTab && (
               <TabsTrigger
                 value="browser"
@@ -447,6 +473,12 @@ export function WorkspacePanel({
           <TodoPanel frameless />
         ) : rightRailTab === "terminals" && showShellsTab ? (
           <InlineTerminalsSection conversationId={conversationId} onExpand={openTerminalsPanel} />
+        ) : rightRailTab === "science" && showScienceTab ? (
+          <SciencePanel
+            conversationId={conversationId}
+            projectDir={projectDir}
+            onOpenFile={openFileViewer}
+          />
         ) : (
           showFilesPanel && (
             <FilesPanel

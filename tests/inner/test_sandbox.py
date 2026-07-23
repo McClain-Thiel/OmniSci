@@ -110,6 +110,73 @@ def test_run_launcher_propagates_target_returncode(caplog) -> None:
     assert any("[omnigent-sandbox] target exited rc=7" in m for m in messages), messages
 
 
+def test_run_launcher_grants_package_roots_to_spawn_wrap(monkeypatch, tmp_path) -> None:
+    """The inline launcher can import an editable OmniSci checkout."""
+    from omnigent.inner import sandbox as sb
+
+    project_root = tmp_path / "editable-source"
+    project_root.mkdir()
+    package_root = project_root / "omnigent"
+    package_root.mkdir()
+    science_package_root = project_root / "science" / "omnisci"
+    science_package_root.mkdir(parents=True)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    captured: dict[str, object] = {}
+
+    class _ExecCalled(RuntimeError):
+        pass
+
+    class _FakeBackend:
+        def wrap_launcher_argv(self, argv, policy, cwd, *, target):
+            captured["policy"] = policy
+            return ["/usr/bin/true"]
+
+    policy = SandboxPolicy(
+        backend_type="darwin_seatbelt",
+        active=True,
+        read_roots=None,
+        write_roots=[],
+        write_files=[],
+        allow_network=True,
+    )
+    raw = json.dumps(policy.to_jsonable(), separators=(",", ":"), sort_keys=True).encode("utf-8")
+    encoded = base64.urlsafe_b64encode(raw).decode("ascii")
+
+    monkeypatch.delenv(sb._LAUNCHER_WRAPPED_ENV, raising=False)
+    monkeypatch.setattr(sb, "get_backend", lambda backend_type: _FakeBackend())
+    monkeypatch.setattr(sb, "create_private_tmpdir", lambda: scratch)
+    monkeypatch.setattr(sb, "_project_root", lambda: project_root)
+    original_encode = sb._encode_json_arg
+
+    def _capture_encoded_policy(value):
+        captured["encoded_policy"] = value
+        return original_encode(value)
+
+    monkeypatch.setattr(sb, "_encode_json_arg", _capture_encoded_policy)
+
+    def _fake_execvp(file, argv):
+        raise _ExecCalled
+
+    monkeypatch.setattr(sb.os, "execvp", _fake_execvp)
+
+    try:
+        sb.run_launcher(encoded, "/bin/echo", ["hi"])
+    except _ExecCalled:
+        pass
+    else:
+        raise AssertionError("spawn-time wrapper did not reach exec")
+
+    wrapped_policy = captured["policy"]
+    assert isinstance(wrapped_policy, SandboxPolicy)
+    assert wrapped_policy.read_roots is not None
+    assert package_root.resolve() in wrapped_policy.read_roots
+    assert science_package_root.resolve() in wrapped_policy.read_roots
+    encoded_policy = captured["encoded_policy"]
+    assert isinstance(encoded_policy, dict)
+    assert encoded_policy["read_roots"] is None
+
+
 def test_exec_launcher_wrapper_subprocess_emits_markers_to_stderr() -> None:
     """
     The generated wrapper script must configure logging so

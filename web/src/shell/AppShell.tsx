@@ -15,6 +15,7 @@ import { readFilesPanelPreferences, writeFilesPanelPreferences } from "@/lib/fil
 import { derivePermissionLevel, isOwnerLevel } from "@/lib/permissionsApi";
 import {
   isAndroidShell,
+  isElectronShell,
   isIOSShell,
   isMacElectronShell,
   onNativeSidebarDrag,
@@ -66,6 +67,7 @@ import { useChatStore } from "@/store/chatStore";
 import { livenessRowFromSession, useSessionLiveness } from "@/hooks/useSessionLiveness";
 import { useResizableInlinePanel } from "@/hooks/useResizableInlinePanel";
 import { ChatHeader } from "./ChatHeader";
+import { UpdateBanner } from "@/components/UpdateBanner";
 import { ExecutionLogsPanel } from "./ExecutionLogsPanel";
 import { FileViewer } from "./FileViewer";
 import { FileViewerContext } from "./FileViewerContext";
@@ -83,6 +85,7 @@ import {
 import { TerminalsPanel } from "./TerminalsPanel";
 import { TodoPanel } from "./TodoPanel";
 import { PermissionsModal } from "@/components/PermissionsModal";
+import { SciencePanel } from "@/components/science/SciencePanel";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { CommandPalette } from "./CommandPalette";
 import { Toaster } from "@/components/ui/toast";
@@ -241,6 +244,7 @@ export function AppShell() {
   const [subagentsPanelOpen, setSubagentsPanelOpen] = useState(false);
   const [shellsPanelOpen, setShellsPanelOpen] = useState(false);
   const [todosPanelOpen, setTodosPanelOpen] = useState(false);
+  const [sciencePanelOpen, setSciencePanelOpen] = useState(false);
   // The right "Workspace" rail (WorkspacePanel) remembers its open/closed
   // state per session. A brand-new session (no saved `open`) follows the
   // Appearance "Workspace panel" default; reopening a session restores how
@@ -393,12 +397,16 @@ export function AppShell() {
   // admin set OMNIGENT_SHARING_MODE=off reports sharing_mode "off" via
   // /v1/info. Fail open (share enabled) while the capability probe loads.
   const sharingOff = serverInfo !== "loading" && serverInfo.sharing_mode === "off";
+  // Science rail tab: only when the server reports the science workbench
+  // package importable (``science_enabled`` in /v1/info). Fails closed while
+  // the probe loads so the tab never flashes on a server without the routes.
+  const scienceEnabled = serverInfo !== "loading" && serverInfo.science_enabled;
   const shareDisabled = canShare && (isCurrentServerLocal() || sharingOff);
   const shareDisabledReason = !shareDisabled
     ? undefined
     : isCurrentServerLocal()
       ? "Sharing is unavailable from a local server."
-      : "Sharing has been disabled for this Omnigent server.";
+      : "Sharing has been disabled for this OmniSci server.";
   // Any viewer can fork a shared session; top-level only (the server
   // rejects forking a sub-agent). Surfaced as ForkDialogContext.canFork —
   // the per-message "Fork from here" action is the only fork entry point.
@@ -520,6 +528,8 @@ export function AppShell() {
         // loads, so native sessions don't flash the tab.
         terminals: !hideTerminalsTab && (railTerminals.length > 0 || agentSupportsShells),
         todos: todosSupported && todos.length > 0,
+        // Science tab: server-capability-gated only (see ``scienceEnabled``).
+        science: scienceEnabled,
       }) as const,
     [
       showFilesPanel,
@@ -528,6 +538,7 @@ export function AppShell() {
       agentSupportsShells,
       todosSupported,
       todos.length,
+      scienceEnabled,
     ],
   );
   // Whether the rail has anything at all to show. When false the workspace
@@ -543,7 +554,7 @@ export function AppShell() {
   // convergent even when several tabs vanish at once.
   useEffect(() => {
     if (railTabsAvailable[rightRailTab]) return;
-    const next = (["files", "subagents", "terminals", "todos", "browser"] as const).find(
+    const next = (["files", "subagents", "terminals", "todos", "science", "browser"] as const).find(
       (t) => railTabsAvailable[t],
     );
     if (next) setRightRailTab(next);
@@ -700,6 +711,7 @@ export function AppShell() {
     setSubagentsPanelOpen(false);
     setShellsPanelOpen(false);
     setTodosPanelOpen(false);
+    setSciencePanelOpen(false);
     setFilesPanelShowHidden(false);
     if (!conversationId) {
       // No session → no rail; false (not the open default) so rail-gated
@@ -853,6 +865,7 @@ export function AppShell() {
       setFilesPanelOpen(false); // close files drawer so the viewer is unobscured
       setSubagentsPanelOpen(false); // close mobile agents drawer
       setTodosPanelOpen(false); // close mobile tasks drawer
+      setSciencePanelOpen(false); // close mobile science drawer
       // Pull the rail to the Files tab when parked on a tab where the viewer
       // won't render (Terminals, Subagents, Todos). The Files tab surfaces the
       // FileViewer inline, so leave it undisturbed.
@@ -1044,6 +1057,7 @@ export function AppShell() {
     setSubagentsPanelOpen(false); // close mobile agents drawer
     setShellsPanelOpen(false); // close mobile shells drawer
     setTodosPanelOpen(false); // close mobile tasks drawer
+    setSciencePanelOpen(false); // close mobile science drawer
     setPanelInitialKey(key);
   }
 
@@ -1055,6 +1069,7 @@ export function AppShell() {
     setSubagentsPanelOpen(false); // close mobile agents drawer
     setShellsPanelOpen(false); // close mobile shells drawer
     setTodosPanelOpen(false); // close mobile tasks drawer
+    setSciencePanelOpen(false); // close mobile science drawer
     setExecutionLogsKey(key);
   }
 
@@ -1069,6 +1084,7 @@ export function AppShell() {
     setSubagentsPanelOpen(false); // close mobile agents drawer
     setShellsPanelOpen(false); // close mobile shells drawer
     setTodosPanelOpen(false); // close mobile tasks drawer
+    setSciencePanelOpen(false); // close mobile science drawer
     setFilesPanelOpen(true);
   }
 
@@ -1082,6 +1098,7 @@ export function AppShell() {
     setFilesPanelOpen(false); // close files drawer
     setShellsPanelOpen(false); // close mobile shells drawer
     setTodosPanelOpen(false); // close mobile tasks drawer
+    setSciencePanelOpen(false); // close mobile science drawer
     setSubagentsPanelOpen(true);
   }
 
@@ -1096,6 +1113,7 @@ export function AppShell() {
     setFilesPanelOpen(false); // close files drawer
     setSubagentsPanelOpen(false); // close mobile agents drawer
     setTodosPanelOpen(false); // close mobile tasks drawer
+    setSciencePanelOpen(false); // close mobile science drawer
     setShellsPanelOpen(true);
   }
 
@@ -1109,7 +1127,21 @@ export function AppShell() {
     setFilesPanelOpen(false); // close files drawer
     setSubagentsPanelOpen(false); // close mobile agents drawer
     setShellsPanelOpen(false); // close mobile shells drawer
+    setSciencePanelOpen(false); // close mobile science drawer
     setTodosPanelOpen(true);
+  }
+
+  // Mobile FAB → "Science" opens the workbench as a full-screen drawer.
+  function openSciencePanel() {
+    setSelectedFilePath(null);
+    clearFileViewerUrl();
+    setPanelInitialKey(null);
+    setExecutionLogsKey(null);
+    setFilesPanelOpen(false);
+    setSubagentsPanelOpen(false);
+    setShellsPanelOpen(false);
+    setTodosPanelOpen(false);
+    setSciencePanelOpen(true);
   }
 
   function openMainExecutionLog() {
@@ -1301,12 +1333,14 @@ export function AppShell() {
                     subagentsPanelOpen,
                     shellsPanelOpen,
                     todosPanelOpen,
+                    sciencePanelOpen,
                     hideTerminalsTab,
                     showShellsTab: railTabsAvailable.terminals,
                     terminalsLength: railTerminals.length,
                     todosSupported,
                     todosCompleted,
                     todosTotal: todos.length,
+                    showScienceTab: railTabsAvailable.science,
                     debugMode,
                     changedCount,
                     subagentsWorking,
@@ -1315,10 +1349,12 @@ export function AppShell() {
                     onOpenShells: openShellsPanel,
                     onOpenSubagents: openSubagentsPanel,
                     onOpenTodos: openTodosPanel,
+                    onOpenScience: openSciencePanel,
                     onOpenMainExecutionLog: openMainExecutionLog,
                   }}
                 />
                 <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+                  {isElectronShell() && <UpdateBanner />}
                   <Outlet />
                 </main>
 
@@ -1340,6 +1376,7 @@ export function AppShell() {
                   !filesPanelOpen && (
                     <WorkspacePanel
                       conversationId={conversationId}
+                      projectDir={activeSession?.workspace ?? activeConv?.workspace ?? null}
                       width={inlinePanelWidth}
                       inert={inlinePanelWidth === 0}
                       handleProps={inlinePanelHandleProps}
@@ -1347,6 +1384,7 @@ export function AppShell() {
                       onRightRailTabChange={handleRightRailTabChange}
                       showFilesPanel={showFilesPanel}
                       showBrowserTab={railTabsAvailable.browser}
+                      showScienceTab={railTabsAvailable.science}
                       changedCount={changedCount}
                       showShellsTab={railTabsAvailable.terminals}
                       terminalsLength={railTerminals.length}
@@ -1436,6 +1474,20 @@ export function AppShell() {
                   <InlineTerminalsSection
                     conversationId={conversationId}
                     onExpand={openTerminalsPanel}
+                  />
+                </MobilePanelDrawer>
+              )}
+              {conversationId && railTabsAvailable.science && (
+                <MobilePanelDrawer
+                  open={sciencePanelOpen}
+                  title="Provenance"
+                  onClose={() => setSciencePanelOpen(false)}
+                  testId="science-panel-drawer"
+                >
+                  <SciencePanel
+                    conversationId={conversationId}
+                    projectDir={activeSession?.workspace ?? activeConv?.workspace ?? null}
+                    onOpenFile={openFileViewer}
                   />
                 </MobilePanelDrawer>
               )}

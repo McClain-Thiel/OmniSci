@@ -143,7 +143,7 @@ export function PermissionsModal({ sessionId, open, onOpenChange }: PermissionsM
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">Sharing unavailable</DialogTitle>
             <DialogDescription>
-              Sharing has been disabled for this Omnigent server.
+              Sharing has been disabled for this OmniSci server.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -509,7 +509,7 @@ function CopyLinkButton({ sessionId }: { sessionId: string }) {
 /**
  * A separate modal showing a QR code encoding the session's
  * `omnigent://<host>/c/<id>` deep link so a user can scan it with their phone
- * to open the session in the Omnigent app. The code is rendered on a fixed
+ * to open the session in the OmniSci app. The code is rendered on a fixed
  * white tile so it stays scannable regardless of the app's dark/light theme
  * (a dark-on-dark QR won't read). Error correction is bumped to M for
  * resilience against partial occlusion.
@@ -535,7 +535,7 @@ function QrCodeDialog({
             Open in mobile app
           </DialogTitle>
           <DialogDescription>
-            Scan with your phone's camera to open this session in the Omnigent app.
+            Scan with your phone's camera to open this session in the OmniSci app.
           </DialogDescription>
         </DialogHeader>
         <div className="flex justify-center">
@@ -548,7 +548,7 @@ function QrCodeDialog({
               // mode; the padding also serves as the QR quiet zone.
               bgColor="#ffffff"
               fgColor="#000000"
-              aria-label="QR code to open this session in the Omnigent app"
+              aria-label="QR code to open this session in the OmniSci app"
             />
           </div>
         </div>

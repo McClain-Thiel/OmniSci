@@ -30,6 +30,12 @@ describe("sessionWorkspaceState", () => {
     });
   });
 
+  it("persists the contextual Project rail tab", () => {
+    writeSessionWorkspaceState("conv_project", { rightRailTab: "science" });
+
+    expect(readSessionWorkspaceState("conv_project")).toEqual({ rightRailTab: "science" });
+  });
+
   it("keeps sessions isolated by id", () => {
     writeSessionWorkspaceState("conv_a", { open: true });
     writeSessionWorkspaceState("conv_b", { open: false, widthPx: 600 });

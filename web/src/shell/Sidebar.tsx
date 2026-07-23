@@ -24,6 +24,7 @@ import {
   FolderInputIcon,
   FolderMinusIcon,
   FolderOpenIcon,
+  FlaskConicalIcon,
   GitBranchIcon,
   InboxIcon,
   ListChecksIcon,
@@ -208,13 +209,19 @@ interface SidebarProps {
  * which is `inbox` in both standalone and embedded modes. Conversation ids are
  * `conv_…`-prefixed, so a chat route's leaf can never collide with `inbox`.
  */
-function useActiveNavItem(): { isNewChatPage: boolean; isInboxPage: boolean } {
+function useActiveNavItem(): {
+  isNewChatPage: boolean;
+  isInboxPage: boolean;
+  isProjectPage: boolean;
+} {
   const { conversationId: activeConversationId } = useParams<{ conversationId: string }>();
-  const isInboxPage = useLocation().pathname.split("/").filter(Boolean).at(-1) === "inbox";
+  const routeLeaf = useLocation().pathname.split("/").filter(Boolean).at(-1);
+  const isInboxPage = routeLeaf === "inbox";
+  const isProjectPage = routeLeaf === "project";
   // Exclude inbox: it also has no `:conversationId`, so it would otherwise
   // light up the "New session" button.
-  const isNewChatPage = activeConversationId == null && !isInboxPage;
-  return { isNewChatPage, isInboxPage };
+  const isNewChatPage = activeConversationId == null && !isInboxPage && !isProjectPage;
+  return { isNewChatPage, isInboxPage, isProjectPage };
 }
 
 /**
@@ -362,13 +369,13 @@ export function Sidebar({ open, onClose, dragProgress = null, onOpenSearch }: Si
   }
 
   // Which top-level nav button to highlight for the current route.
-  const { isNewChatPage, isInboxPage } = useActiveNavItem();
+  const { isNewChatPage, isInboxPage, isProjectPage } = useActiveNavItem();
 
   // On /settings the card keeps its chrome but swaps the conversation list
   // for the settings section nav (see settingsNav.tsx) — entering settings
   // shouldn't replace the whole sidebar.
   const { inSettings } = useSettingsRoute();
-  // Remember the pre-settings location so "Back to Omnigent" returns to the
+  // Remember the pre-settings location so "Back to OmniSci" returns to the
   // conversation the user was viewing, not the home page. Tracked here since
   // the sidebar stays mounted across the transition into settings.
   useTrackSettingsReturn();
@@ -474,9 +481,17 @@ export function Sidebar({ open, onClose, dragProgress = null, onOpenSearch }: Si
             <Link
               to="/"
               onClick={onNavClick}
-              className="rounded-sm text-[15px] font-semibold tracking-tight text-foreground transition-colors hover:text-foreground/70"
+              className="group flex min-w-0 items-center gap-2 rounded-md text-foreground transition-colors hover:text-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              Omnigent
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-teal-500/10 text-teal-700 dark:text-teal-300">
+                <FlaskConicalIcon className="size-3.5" />
+              </span>
+              <span className="flex min-w-0 flex-col leading-none">
+                <span className="text-[15px] font-semibold tracking-tight">OmniSci</span>
+                <span className="mt-0.5 truncate font-mono text-[8px] uppercase tracking-[0.16em] text-muted-foreground">
+                  research workspace
+                </span>
+              </span>
             </Link>
             <div className="flex items-center gap-1">
               {/* Inbox lives at the top next to the collapse toggle. Rendered
@@ -563,6 +578,20 @@ export function Sidebar({ open, onClose, dragProgress = null, onOpenSearch }: Si
               >
                 <SquarePenIcon className="size-4 text-foreground" />
                 New session
+              </Link>
+            </Button>
+            <Button
+              asChild
+              className={cn(
+                "w-full justify-start gap-1 px-2 text-sm",
+                isProjectPage && "bg-muted font-semibold",
+              )}
+              variant="ghost"
+              data-testid="project-button"
+            >
+              <Link to="/project" onClick={onNavClick}>
+                <FlaskConicalIcon className="size-4 text-teal-700 dark:text-teal-300" />
+                Provenance
               </Link>
             </Button>
             {selectionMode ? (
@@ -2218,7 +2247,7 @@ function ConversationMenuItems({
                 reason when both apply. */}
             <TooltipContent side="left">
               {sharingOff
-                ? "Sharing has been disabled for this Omnigent server."
+                ? "Sharing has been disabled for this OmniSci server."
                 : "Only the session owner can share this session"}
             </TooltipContent>
           </Tooltip>

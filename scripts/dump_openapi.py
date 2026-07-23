@@ -272,14 +272,6 @@ _TAGS: list[dict[str, str]] = [
         ),
     },
     {
-        "name": "projects",
-        "x-displayName": "Projects",
-        "description": (
-            "First-class, owner-private containers that group sessions — "
-            "create, list, rename, and delete."
-        ),
-    },
-    {
         "name": "system",
         "x-displayName": "System",
         "description": "Health, version, and identity endpoints for the running server.",
@@ -337,7 +329,6 @@ def _build_app_with_stub_stores() -> Any:
     from omnigent.stores.file_store.sqlalchemy_store import SqlAlchemyFileStore
     from omnigent.stores.host_store import HostStore
     from omnigent.stores.policy_store.sqlalchemy_store import SqlAlchemyPolicyStore
-    from omnigent.stores.project_store.sqlalchemy_store import SqlAlchemyProjectStore
 
     # On-disk SQLite (mkdtemp ensures uniqueness so concurrent
     # invocations don't collide).
@@ -358,7 +349,6 @@ def _build_app_with_stub_stores() -> Any:
         # Pass stores so conditionally-mounted routes stay in the spec.
         host_store=HostStore(db_uri),
         policy_store=SqlAlchemyPolicyStore(db_uri),
-        project_store=SqlAlchemyProjectStore(db_uri),
     )
 
 

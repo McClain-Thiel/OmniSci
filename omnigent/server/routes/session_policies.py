@@ -297,9 +297,7 @@ def create_session_policies_router(
             unchanged.
         :returns: The updated policy as a serialized dict.
         :raises OmnigentError: 401/403 if the user lacks edit
-            permission, 404 if the policy is not found, or 409 if
-            renaming would collide with another policy in this
-            session.
+            permission, or 404 if the policy is not found.
         """
         user_id = get_user_id(request, auth_provider)
         if permission_store is not None:
@@ -333,19 +331,13 @@ def create_session_policies_router(
                         f"must add custom handlers via the 'policy_modules' config.",
                         code=ErrorCode.INVALID_INPUT,
                     )
-        try:
-            policy = store.update(
-                policy_id,
-                session_id,
-                name=body.name,
-                handler=body.handler,
-                enabled=body.enabled,
-            )
-        except IntegrityError as exc:
-            raise OmnigentError(
-                f"Policy with name '{body.name}' already exists in this session",
-                code=ErrorCode.CONFLICT,
-            ) from exc
+        policy = store.update(
+            policy_id,
+            session_id,
+            name=body.name,
+            handler=body.handler,
+            enabled=body.enabled,
+        )
         if policy is None:
             raise OmnigentError("Policy not found", code=ErrorCode.NOT_FOUND)
         invalidate_session_policy_specs_cache(session_id)

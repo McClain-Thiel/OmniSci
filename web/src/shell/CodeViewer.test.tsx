@@ -81,7 +81,11 @@ function renderViewer(
   content: string,
   panelOpen = true,
   path = "notes.md",
-  opts: { viewMode?: "editor" | "preview" | "source" | "diff"; truncated?: boolean } = {},
+  opts: {
+    viewMode?: "editor" | "preview" | "source" | "diff";
+    truncated?: boolean;
+    onNavigateTo?: (path: string) => void;
+  } = {},
 ) {
   // Markdown source view still renders via the Shiki DOM, where the
   // select-all/copy override under test lives. Non-markdown files now render in
@@ -100,6 +104,7 @@ function renderViewer(
       setSearchOpen={() => {}}
       searchInputRef={noopRef}
       viewMode={opts.viewMode ?? "source"}
+      onNavigateTo={opts.onNavigateTo}
     />,
   );
 }
@@ -270,6 +275,36 @@ describe("CodeViewer markdown preview rendering (issue #970)", () => {
     const { container } = renderMd("# Title\n\n## Subtitle");
     expect(container.querySelector("h1")?.textContent).toBe("Title");
     expect(container.querySelector("h2")?.textContent).toBe("Subtitle");
+  });
+
+  it("opens workspace-relative links in the file viewer", () => {
+    const onNavigateTo = vi.fn();
+    renderViewer("[plot](../figures/plot.svg?raw=true#chart)", true, "notes/README.md", {
+      viewMode: "preview",
+      onNavigateTo,
+    });
+
+    fireEvent.click(screen.getByRole("link", { name: "plot" }));
+
+    expect(onNavigateTo).toHaveBeenCalledWith("figures/plot.svg");
+  });
+
+  it("leaves external and same-document markdown links to the browser", () => {
+    const onNavigateTo = vi.fn();
+    renderViewer(
+      "[external](https://example.com/plot.svg) [section](#results)",
+      true,
+      "README.md",
+      { viewMode: "preview", onNavigateTo },
+    );
+
+    expect(screen.getByRole("link", { name: "external" })).toHaveAttribute(
+      "href",
+      "https://example.com/plot.svg",
+    );
+    fireEvent.click(screen.getByRole("link", { name: "section" }));
+
+    expect(onNavigateTo).not.toHaveBeenCalled();
   });
 
   it("renders bullet and ordered lists", () => {

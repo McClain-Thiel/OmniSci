@@ -728,7 +728,21 @@ def run_launcher(encoded_sandbox: str, target_path: str, argv: list[str]) -> int
         tmpdir = create_private_tmpdir()
         try:
             sandbox = with_additional_write_roots(sandbox, [tmpdir])
+            project_root_path = _project_root()
+            wrap_read_roots = list(sandbox.read_roots or [])
+            for package_root in _framework_package_roots(project_root_path):
+                if package_root not in wrap_read_roots:
+                    wrap_read_roots.append(package_root)
+            wrap_sandbox = _clone_policy_with(
+                sandbox,
+                read_roots=wrap_read_roots,
+                write_roots=list(sandbox.write_roots),
+                write_files=list(sandbox.write_files),
+            )
             set_temp_env(os.environ, tmpdir)
+            # The framework checkout is a bootstrap grant for the
+            # sandbox-exec/bwrap profile, not a user-authored file-tool
+            # grant. Keep it out of the policy decoded by the target.
             encoded_sandbox = _encode_json_arg(sandbox.to_jsonable())
             # Name the dir for the in-wrap pass: it adopts this exact
             # path (no second mint) and owns the cleanup on exit.
@@ -748,7 +762,7 @@ def run_launcher(encoded_sandbox: str, target_path: str, argv: list[str]) -> int
             # The inline carries the RE-ENCODED policy so the in-wrap
             # pass decodes the same granted scratch root the profile
             # was built from.
-            project_root = repr(str(_project_root()))
+            project_root = repr(str(project_root_path))
             inline = (
                 "import sys; "
                 f"sys.path.insert(0, {project_root}); "
@@ -760,7 +774,7 @@ def run_launcher(encoded_sandbox: str, target_path: str, argv: list[str]) -> int
             wrapped = list(
                 backend.wrap_launcher_argv(
                     launcher_argv,
-                    sandbox,
+                    wrap_sandbox,
                     Path(os.getcwd()),
                     target=target_path,
                 )
@@ -768,7 +782,7 @@ def run_launcher(encoded_sandbox: str, target_path: str, argv: list[str]) -> int
             os.environ[_LAUNCHER_WRAPPED_ENV] = "1"
             logger.info(
                 "[omnigent-sandbox] spawn-time wrap re-exec backend=%s wrap_head=%s",
-                sandbox.backend_type,
+                wrap_sandbox.backend_type,
                 wrapped[:3],
             )
             # ``os.execvp`` replaces the process; nothing after this
@@ -958,6 +972,22 @@ def _project_root() -> Path:
     # File lives at omnigent/inner/sandbox.py; climb two levels to the
     # repo root that hosts `omnigent/` as a package.
     return Path(__file__).resolve().parents[2]
+
+
+def _framework_package_roots(project_root: Path | None = None) -> list[Path]:
+    """Return framework-owned package roots needed by bundled console scripts."""
+    root = (project_root or _project_root()).resolve(strict=False)
+    candidates = (
+        root / "omnigent",
+        root / "science" / "omnisci",
+        root / "omnisci",
+    )
+    roots: list[Path] = []
+    for candidate in candidates:
+        resolved = candidate.resolve(strict=False)
+        if candidate.is_dir() and resolved not in roots:
+            roots.append(resolved)
+    return roots
 
 
 def _encode_json_arg(value: JsonValue) -> str:
