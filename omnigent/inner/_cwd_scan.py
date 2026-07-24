@@ -277,13 +277,11 @@ def scan_cwd_mask_entries(
                 if key in seen:
                     continue
                 seen.add(key)
-                # ``is_dir`` follows symlinks by default — matches what
-                # the agent would observe through the bind. For broken
-                # symlinks it returns False; the backend's "file"
-                # emitter handles both (``--bind /dev/null`` works on
-                # a broken symlink; SBPL ``(literal ...)`` denies the
-                # path regardless of what it points at).
-                kind: MaskKind = "dir" if child.is_dir() else "file"
+                # Mount over the link itself, not its target. Bubblewrap
+                # cannot place a tmpfs on a symlink whose target is outside
+                # the visible roots, while a file bind masks both file- and
+                # directory-shaped symlinks.
+                kind: MaskKind = "dir" if child.is_dir(follow_symlinks=False) else "file"
                 entries.append(MaskedEntry(path=child_path, kind=kind))
                 # Prune: don't descend into a masked dir.
                 continue
