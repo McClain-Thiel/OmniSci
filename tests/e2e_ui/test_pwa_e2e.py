@@ -194,7 +194,7 @@ def test_pwa_installable_sw_registers_and_never_serves_the_shell(
     assert manifest["linked"], "index.html has no <link rel=manifest>"
     assert manifest["status"] == 200
     assert manifest["contentType"].startswith("application/manifest+json")
-    assert manifest["name"] == "Omnigent"
+    assert manifest["name"] == "OmniSci"
     assert manifest["display"] == "standalone"
     assert manifest["icons"] >= 2  # 192 + 512 is the installability minimum
 

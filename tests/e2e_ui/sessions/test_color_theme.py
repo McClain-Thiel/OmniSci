@@ -2,10 +2,10 @@
 
 Alongside the light/dark **mode** tiles, ``AppearanceSection``
 (``pages/SettingsPage.tsx``) renders a "Color theme" dropdown (a shadcn
-``Select``) — one option per palette (Omnigent, Dracula, GitHub, Catppuccin,
+``Select``) — one option per palette (OmniSci, Dracula, GitHub, Catppuccin,
 Gruvbox, Nord). Choosing one calls ``applyThemePalette`` (``lib/themePalette.ts``),
 which sets ``data-theme`` on ``<html>`` and persists the id to
-``localStorage["omnigent:ui-theme-palette"]``. The default "Omnigent" palette
+``localStorage["omnigent:ui-theme-palette"]``. The default "OmniSci" palette
 carries no override, so choosing it removes the attribute and clears the key.
 
 The palette axis is orthogonal to the light/dark class next-themes toggles, so
@@ -73,17 +73,17 @@ def test_color_palette_applies_persists_and_resets(
 ) -> None:
     """Selecting a palette skins ``<html>`` + persists; the default clears it.
 
-    Fresh load is the default "Omnigent" (its name shown, nothing stored, no
+    Fresh load is the default "OmniSci" (its name shown, nothing stored, no
     ``data-theme``). Picking GitHub sets ``data-theme="github"`` and persists it —
-    and survives a reload (re-applied at boot). Returning to Omnigent removes the
+    and survives a reload (re-applied at boot). Returning to OmniSci removes the
     attribute and clears the stored key.
     """
     base_url, _session_id = seeded_session
     _open_appearance(page, base_url)
 
-    # Fresh context → default "Omnigent": the trigger shows it, no override, and
+    # Fresh context → default "OmniSci": the trigger shows it, no override, and
     # nothing persisted.
-    expect(_color_theme_select(page)).to_contain_text("Omnigent")
+    expect(_color_theme_select(page)).to_contain_text("OmniSci")
     assert _data_theme(page) is None, "expected no data-theme override on a fresh load"
     assert _stored_palette(page) is None, "expected no persisted palette on a fresh load"
 
@@ -100,11 +100,11 @@ def test_color_palette_applies_persists_and_resets(
     assert _data_theme(page) == "github", "saved palette not re-applied after reload"
     expect(_color_theme_select(page)).to_contain_text("GitHub")
 
-    # → back to Omnigent (the default): the override is removed and the stored
+    # → back to OmniSci (the default): the override is removed and the stored
     # key cleared, since the default reverts to the base brand tokens.
-    _pick_palette(page, "Omnigent")
-    expect(_color_theme_select(page)).to_contain_text("Omnigent")
-    assert _data_theme(page) is None, "<html> kept data-theme after returning to Omnigent"
+    _pick_palette(page, "OmniSci")
+    expect(_color_theme_select(page)).to_contain_text("OmniSci")
+    assert _data_theme(page) is None, "<html> kept data-theme after returning to OmniSci"
     assert _stored_palette(page) is None, "the palette key was not cleared for the default"
 
 

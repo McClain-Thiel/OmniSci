@@ -136,7 +136,7 @@ def test_update_banner_renders_across_the_status_lifecycle(
 
     # Available: version copy + the three offered actions + release notes.
     expect(banner).to_be_visible()
-    expect(banner).to_contain_text("Omnigent 9.9.9 is available.")
+    expect(banner).to_contain_text("OmniSci 9.9.9 is available.")
     expect(banner.get_by_role("button", name="Update now")).to_be_visible()
     expect(banner.get_by_role("button", name="Later")).to_be_visible()
     expect(banner.get_by_role("button", name="Skip this version")).to_be_visible()
@@ -147,13 +147,13 @@ def test_update_banner_renders_across_the_status_lifecycle(
         page,
         '{ state: "downloading", info: { version: "9.9.9" }, progress: { percent: 42 } }',
     )
-    expect(banner).to_contain_text("Downloading Omnigent update… 42%")
+    expect(banner).to_contain_text("Downloading OmniSci update… 42%")
     expect(banner.get_by_role("progressbar")).to_be_visible()
     expect(banner.get_by_role("button", name="Update now")).to_have_count(0)
 
     # Downloaded: ready-to-install copy + the restart action.
     _emit_status(page, '{ state: "downloaded", info: { version: "9.9.9" } }')
-    expect(banner).to_contain_text("Omnigent 9.9.9 is ready to install.")
+    expect(banner).to_contain_text("OmniSci 9.9.9 is ready to install.")
     expect(banner.get_by_role("button", name="Restart to update")).to_be_visible()
 
 
@@ -180,7 +180,7 @@ def test_update_banner_actions_call_the_bridge(
     expect(page.get_by_placeholder("Ask the agent anything…")).to_be_visible()
 
     banner = page.get_by_role("region", name="Desktop update")
-    expect(banner).to_contain_text("Omnigent 9.9.9 is available.")
+    expect(banner).to_contain_text("OmniSci 9.9.9 is available.")
 
     # Update now → the bridge is asked to download.
     banner.get_by_role("button", name="Update now").dispatch_event("click")
@@ -220,7 +220,7 @@ def test_update_banner_skip_persists_and_hides(
     expect(page.get_by_placeholder("Ask the agent anything…")).to_be_visible()
 
     banner = page.get_by_role("region", name="Desktop update")
-    expect(banner).to_contain_text("Omnigent 9.9.9 is available.")
+    expect(banner).to_contain_text("OmniSci 9.9.9 is available.")
 
     banner.get_by_role("button", name="Skip this version").dispatch_event("click")
 
