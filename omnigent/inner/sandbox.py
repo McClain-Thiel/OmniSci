@@ -975,10 +975,11 @@ def _project_root() -> Path:
 
 
 def _framework_package_roots(project_root: Path | None = None) -> list[Path]:
-    """Return framework-owned package roots needed by bundled console scripts."""
+    """Return framework-owned roots needed by bundled console scripts."""
     root = (project_root or _project_root()).resolve(strict=False)
     candidates = (
         root / "omnigent",
+        root / "examples",
         root / "science" / "omnisci",
         root / "omnisci",
     )

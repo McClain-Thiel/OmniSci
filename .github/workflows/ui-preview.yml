@@ -37,7 +37,8 @@ permissions: {}
 jobs:
   notify:
     if: >-
-      github.event_name != 'push'
+      vars.UI_PREVIEW_ENABLED == 'true'
+      && github.event_name != 'push'
       && github.event.action != 'closed'
       && contains(github.event.pull_request.labels.*.name, 'ui-preview')
       && github.event.pull_request.draft == false
@@ -76,12 +77,15 @@ jobs:
 
   build:
     if: >-
-      github.event_name == 'push'
-      || (
-        github.event.action != 'closed'
-        && contains(github.event.pull_request.labels.*.name, 'ui-preview')
-        && github.event.pull_request.draft == false
-        && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)
+      vars.UI_PREVIEW_ENABLED == 'true'
+      && (
+        github.event_name == 'push'
+        || (
+          github.event.action != 'closed'
+          && contains(github.event.pull_request.labels.*.name, 'ui-preview')
+          && github.event.pull_request.draft == false
+          && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)
+        )
       )
     runs-on: ubuntu-latest
     permissions:
@@ -196,6 +200,7 @@ jobs:
 
   deploy:
     needs: build
+    if: vars.UI_PREVIEW_ENABLED == 'true'
     # Use ubuntu-latest. If the Databricks workspace IP-allowlists, register a
     # static-IP runner and switch `runs-on` to it.
     runs-on: ubuntu-latest
@@ -361,7 +366,8 @@ jobs:
     # and workspace files forever. Run on every close; the delete step is a cheap
     # no-op (one existence check) for PRs that never had a preview.
     if: >-
-      github.event_name != 'push'
+      vars.UI_PREVIEW_ENABLED == 'true'
+      && github.event_name != 'push'
       && github.event.action == 'closed'
     runs-on: ubuntu-latest
     permissions:

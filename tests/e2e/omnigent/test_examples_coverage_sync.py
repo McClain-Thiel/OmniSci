@@ -162,6 +162,10 @@ _ALT_COVERED: frozenset[str] = frozenset(
         "timer-test",
         # ralph_loop is a loop-mode demo; no dedicated e2e yet.
         "ralph_loop",
+        # The science bundle is exercised through its app-level lifecycle
+        # in tests/science_server and its service/compute/storage suites
+        # under science/tests rather than as a standalone chat example.
+        "science",
         # ── tests/resources/examples/ agents covered by name elsewhere ──
         # agent_with_client_tools: client-tool knobs are asserted in
         # tests/spec/test_tool_runtime.py (loads the YAML directly).

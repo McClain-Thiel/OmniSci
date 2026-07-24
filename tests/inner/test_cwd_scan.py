@@ -203,6 +203,19 @@ def test_symlink_pointing_outside_safe_roots_is_marked_as_file(tmp_path: Path) -
     assert entry.kind == "file"
 
 
+def test_directory_symlink_outside_safe_roots_is_marked_as_file(tmp_path: Path) -> None:
+    target = tmp_path.parent / f"{tmp_path.name}-outside"
+    target.mkdir()
+    link = tmp_path / "outward_directory"
+    link.symlink_to(target, target_is_directory=True)
+
+    entries = _scan(tmp_path, allow_hidden=[".venv"])
+    entry = _entry_for(entries, link)
+
+    assert entry is not None
+    assert entry.kind == "file"
+
+
 def test_symlink_pointing_into_safe_root_is_not_marked(tmp_path: Path) -> None:
     """
     A symlink whose target resolves inside ``safe_roots`` is NOT

@@ -9,9 +9,11 @@ import logging
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from omnigent.inner.sandbox import (
     SandboxPolicy,
+    _framework_package_roots,
     create_exec_launcher,
     run_launcher,
 )
@@ -43,6 +45,21 @@ def _noop_policy_arg() -> str:
         "utf-8"
     )
     return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def test_framework_package_roots_include_linked_examples(tmp_path: Path) -> None:
+    omnigent_root = tmp_path / "omnigent"
+    examples_root = tmp_path / "examples"
+    science_root = tmp_path / "science" / "omnisci"
+    omnigent_root.mkdir()
+    examples_root.mkdir()
+    science_root.mkdir(parents=True)
+
+    assert _framework_package_roots(tmp_path) == [
+        omnigent_root,
+        examples_root,
+        science_root,
+    ]
 
 
 def test_run_launcher_emits_logger_checkpoints(caplog) -> None:
