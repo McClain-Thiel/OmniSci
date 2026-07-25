@@ -31,6 +31,27 @@ This repository is a fork of [omnigent-ai/omnigent](https://github.com/omnigent-
 | `web/src/pages/LoginPage.tsx`, `web/src/pages/RegisterPage.tsx`, `web/src/components/pwa/PWAUpdateBanner.tsx`, `web/src/components/UpdateBanner.tsx`, `web/src/components/PermissionsModal.tsx`, `web/src/components/OttoEyes.tsx`, `web/src/lib/themePalette.ts` | Use the OmniSci product identity across user-visible auth, update, sharing, accessibility, and theme surfaces.                                        |
 | `web/src/pages/SettingsPage.test.tsx`, `web/src/shell/settingsNav.test.tsx`, `web/src/shell/Sidebar.test.tsx`, `web/src/components/OttoEyes.test.tsx`, `web/src/components/UpdateBanner.test.tsx`                                                                 | Cover OmniSci research settings, navigation defaults, shell branding, and update/accessibility copy.                                                  |
 
+## Fork governance and CI
+
+Changes to inherited repository infrastructure, recorded as a group because they
+landed as one foundation series and a shared table row would conflict five ways.
+
+| File | Reason |
+| ---- | ------ |
+| `.github/MAINTAINER` | Listed 22 upstream logins and none of this fork's, so every PR failed `Maintainer Approval` and no owner lookup resolved. |
+| `.github/areas.json` | Collapse 35 upstream areas into the 13 a single maintainer can act on, and add four science areas: the `omnisci` layer had no component label. |
+| `.github/workflows/areas.test.js` | Allow the four new `comp:*` labels, relax the `>=2 owners` rule to `>=1` for a solo maintainer, and replace the path-resolution cases with ones covering the science carve-outs. |
+| `.github/triage/config.yaml` | The triage prompt hardcodes the label list; without the science labels it could not classify a science issue. |
+| `.github/workflows/ci.yml` | Add a `science` lane — `science/tests` sits outside `tests/` and was collected by no lane — and make coverage per-lane. |
+| `.github/scripts/merge-ready/required.sh` | Resync with the ci.yml matrix (it had drifted both ways) and drop `DCO`, whose GitHub App is installed on the upstream org only, leaving `Merge Ready` permanently un-greenable here. |
+| `.github/workflows/stale.yml` | Unguarded daily cron would auto-close this fork's long-lived roadmap backlog. |
+| `.github/workflows/nightly-failure-monitor.yml` | Unguarded; the nightly e2e crons need gateway secrets this fork lacks, so it would file spurious tracking issues against a hardcoded upstream assignee. |
+| `.github/scripts/rotation*`, `.github/workflows/discord-watch-rotation*.yml` | **Deleted.** Carried real people's names, Slack member IDs, and timezones for upstream's internal on-call rotation. |
+| `.github/ISSUE_TEMPLATE/config.yml` | Pointed contributors at the upstream Discussions tab; repointed here and added a backlog link. |
+| `.github/ISSUE_TEMPLATE/bug_report.yml` | Version instructions assumed an installed `omnigent` binary. |
+| `CONTRIBUTING.md` | Rebranded, and adds what upstream's lacks: how to find work, how to claim an issue, how to run the science suites, the `FORK_DELTA` rule, and the permanent-fork statement. Drops the DCO sign-off requirement with the check. |
+| `RELEASING.md` | Upstream's process publishes from an access-controlled repository this fork cannot reach; replaced with a statement that this fork ships no artifacts, plus the pin-bump procedure. |
+
 ## Added files (not upstream)
 
 - `science/` — self-contained Python package (`omnisci`): domain schemas,
