@@ -22,7 +22,7 @@ workspace.
 | OmniGent provides | OmniSci adds |
 | --- | --- |
 | Conversations, harnesses, models, subagents, tools, sandboxes, and streaming | A folder-scoped scientific record shared across conversations |
-| General shell, file, browser, and MCP execution | Explicit managed runs with job status, logs, outputs, and cost provenance |
+| General shell, file, browser, and MCP execution | Explicit managed runs with job status, logs, outputs, and execution provenance |
 | Files created by agents | Checksummed artifacts linked to tasks, runs, and research-log entries |
 | Synchronous approval and policy controls | Durable science approvals plus an asynchronous reviewer issue checklist |
 

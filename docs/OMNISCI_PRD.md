@@ -109,6 +109,34 @@ specification, provider identity, status, logs, cost when known, and produced
 artifacts. A run is distinct from an ordinary shell or tool call because it is
 explicitly submitted for durable supervision and provenance.
 
+A run's **provenance envelope** is the set of facts required to explain how its
+outputs came to exist. Every field the envelope claims must be one the system
+actually resolved and recorded; a field that is declared but never enforced is
+worse than an absent one, because it invites false confidence.
+
+The envelope is:
+
+| Fact | Source | Status |
+| --- | --- | --- |
+| command and resolved working directory | execution spec | required |
+| provider and provider run id | submission | required |
+| source revision | VCS commit *observed* at submission, with a dirty-tree flag, or recorded as unversioned | required |
+| environment | image reference or digest, interpreter version, lockfile checksum when declared | required |
+| input identity | checksum or storage ETag of each declared input | required |
+| outputs | checksummed artifacts | required |
+
+Cost is deliberately **not** in the envelope for this release. The primary
+deployment target is an institutional cluster, where per-job billing is not
+something the scheduler reports and the researcher does not pay per second. See
+*Deferred*.
+
+**Re-running is a first-class operation.** Submitting the same analysis again
+after correcting an input, a script, or the environment must produce a new run,
+not silently return the previous one. De-duplication is a protection against
+double submission of an identical job, not a cache: it applies only within a
+short submission window, or when the caller supplies an explicit idempotency
+key, and it must consider input identity — not only the text of the spec.
+
 ### Artifact
 
 A stable reference to a scientific output with path or URI, media type, size,
@@ -137,6 +165,21 @@ A durable authorization decision for an action that requires policy or human
 authority. Reviewer issues never grant approval and never become implicit
 approval gates.
 
+An approval authorizes an **envelope**, not merely an action name. For compute
+that envelope is the provider, the accelerator class and count, the runtime
+ceiling, and the cost ceiling; for storage it is the scheme and prefix, and the
+operation. A later request that exceeds any dimension of a granted envelope
+requires a new decision, even when the action string matches.
+
+The failure mode this exists to prevent is a safety layer that users disable.
+An approval prompt that fires on every remote submission, for a condition the
+provider can never satisfy, trains people to set the bypass flag — after which
+the layer protects nothing. Approval conditions must therefore be reachable:
+OmniSci must not require approval for a property a correctly configured
+provider is structurally incapable of offering. Where a provider cannot enforce
+an isolation property, that limitation belongs in the run record and in the UI,
+not in a prompt that cannot be satisfied.
+
 ## Background reviewer
 
 The Science agent periodically dispatches a reviewer as an asynchronous
@@ -153,6 +196,14 @@ It has read-only workspace access and a restricted science interface that can
 only list relevant records, create or update issues, and record the review. It
 cannot submit jobs, install software, modify research outputs, approve access, or
 block the main loop.
+
+The reviewer may resolve and dismiss issues, including ones it raised itself.
+This is deliberate: a critic that can only open issues and never close them
+produces a checklist that grows monotonically, and the cost of a wrongly closed
+issue is lower than the cost of a checklist nobody reads. Closing is still an
+evidence-bearing act — the resolution note must record what evidence answered
+the verification question, and the issue history preserves the close so a human
+can reopen it.
 
 The reviewer should raise an issue only when it can identify:
 
@@ -193,6 +244,90 @@ evaluated for precision, recall, duplicate rate, and resolution utility, and the
 runtime should permit a different model or harness when the added cost is
 justified.
 
+## Compute and storage connectors
+
+Connectors are how a folder-scoped record reaches real compute. They are the
+part of OmniSci a researcher notices first and trusts last, so the contract is
+stated here rather than left to each adapter.
+
+### Connector contract
+
+Every compute provider must satisfy all of the following. A provider that
+cannot is not shipped as a connector.
+
+1. **Submission returns promptly.** `submit` registers the job and returns a
+   reference. It does not block for the duration of the work. Long-running
+   science is the normal case, and a request path that blocks for the length of
+   an analysis is not supervision.
+2. **State is durable and external.** `status`, `logs`, `cancel`, and `collect`
+   work from a different process and after an application restart, using
+   persisted provider state rather than an in-memory handle.
+3. **Terminal states release resources.** When a run reaches any terminal state
+   — including failure, timeout, and cancellation — the provider releases the
+   remote resources it allocated. Metered resources are never left running as a
+   side effect of an unsuccessful outcome.
+4. **Capabilities are declared, and validation rejects what cannot be
+   enforced.** A provider that cannot honor a requested isolation, resource, or
+   environment property fails validation with a specific message instead of
+   accepting the spec and quietly ignoring the property.
+5. **Logs are pageable.** `logs` accepts a cursor and returns bounded pages.
+   Reconciling a run does not transfer its entire log.
+6. **Cost is reported when the provider reports it**, and the declared cost
+   ceiling is enforced before submission rather than described in a prompt.
+
+### Staging
+
+Remote providers stage the working tree by default. Staging must succeed on an
+ordinary research folder, which means it must tolerate what those folders
+actually contain.
+
+A job may instead declare a **remote working directory** that already exists on
+the execution host, in which case OmniSci stages nothing and runs in place. This
+is the normal shape of cluster work: the scheduler's nodes share a filesystem
+and the data is already on it, so copying the tree per submission is waste.
+Staging remains the default because a bare SSH host has no such guarantee, but
+the no-stage path is a first-class mode, not a workaround — and a run that used
+it records the remote path as part of its provenance, since the tree was not
+captured.
+
+- Virtual environments, dependency caches, and build outputs are excluded by
+  default, and the exclusion set is user-extensible through an ignore file
+  rather than a hard-coded constant.
+- Symbolic links are skipped with a recorded warning, not treated as fatal.
+  Refusing to stage a tree because it contains a symlink rejects most real
+  projects, including the layout OmniSci itself creates.
+- Large inputs are referenced through a storage connector rather than copied on
+  every submission, and repeated submissions do not re-transfer unchanged data.
+
+### Degradation
+
+Connector configuration is application-scoped and independent of any one
+project. A connector that is missing, misconfigured, or unreachable degrades to
+an unavailable connector with a diagnosable reason. It must not prevent the
+project record from loading: tasks, research logs, issues, and artifacts remain
+readable when compute is broken, because the record is the durable asset and
+compute is not.
+
+Provider construction is therefore lazy, and its failure is reported per
+connector in the infrastructure view rather than raised from the project API.
+
+## Verification
+
+The scientific record is an auditability claim, and an auditability claim that
+is not itself tested is a marketing claim. Verification is a product
+requirement, not an engineering detail.
+
+- Every connector has an end-to-end test that submits, reconciles across a
+  simulated restart, collects checksummed outputs, and asserts that a terminal
+  failure released remote resources.
+- The reviewer dispatch loop is covered end to end: the main agent dispatches
+  asynchronously, the main turn is not blocked, the reviewer records a review
+  and raises an issue, and the issue reaches the workbench.
+- The science UI surfaces are covered by the same end-to-end UI suite as the
+  rest of the application.
+- Provenance survives a round trip: export and re-import reproduce every
+  durable record and its links.
+
 ## P0 requirements
 
 - Any existing folder can be opened as an OmniSci workspace.
@@ -209,13 +344,23 @@ justified.
   the main agent.
 - Ordinary tools continue to run through OmniGent without passing through
   `ScienceService`.
+- Every shipped compute connector satisfies the connector contract above.
+- Re-submitting a corrected analysis produces a new run.
+- A run records its full provenance envelope, or omits a fact it could not
+  resolve rather than recording an unenforced one.
+- A misconfigured connector never prevents a project's records from loading.
+- Product documentation claims no capability the code does not implement.
 
 ## P1 requirements
 
 - Reviewer dispatch cadence can be configured per Science agent.
 - The UI can filter issues by session, severity, and status.
-- Duplicate reviewer findings are merged using a stable fingerprint.
 - Research logs can be rendered as a chronological notebook-like timeline.
+- Approvals bind a compute or storage envelope rather than an action name.
+- A job can declare an existing remote working directory and skip staging.
+- Incremental staging avoids re-transferring unchanged inputs.
+- Reviewer quality is measured — precision, duplicate rate, and resolution
+  utility — against a fixed sample of recorded reviews.
 
 ## Success criteria
 
@@ -228,6 +373,28 @@ justified.
   in-flight agent turn.
 - Removing the `omnisci` package leaves normal OmniGent agent and tool behavior
   unchanged.
+- A researcher can submit a job to a cluster or a cloud sandbox from an ordinary
+  project folder — one containing a virtual environment, symlinks, and a large
+  `data/` directory — without hand-preparing the tree.
+- A failed remote job leaves no metered resource running.
+- A second researcher can reconstruct a result from the exported record alone.
+
+## Deferred
+
+Recorded so they are not silently dropped, and explicitly not committed for this
+release.
+
+- **Cost tracking.** Provider-reported cost on the run record, and enforcement
+  of a declared cost ceiling before submission. Deferred because the primary
+  deployment target is an institutional Slurm cluster, where the scheduler does
+  not report per-job cost and the researcher is not billed per second. This
+  becomes P1 the moment metered cloud compute (Modal, cloud GPU) is a mainstream
+  path rather than an option. Until then no product surface may claim it.
+- **Requested source revisions.** Asking a provider to check out a specific
+  commit before running. The *observed* revision is part of the provenance
+  envelope and is required; asking the provider to enforce a requested one is
+  not. A field that requests a checkout nobody performs is the exact
+  unenforced-fact failure this document forbids.
 
 ## Open questions
 
