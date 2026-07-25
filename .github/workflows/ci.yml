@@ -141,6 +141,14 @@ jobs:
             paths: tests/db tests/deploy
             extra: databricks
             markexpr: databricks
+          # The omnisci package lives outside tests/, so no other lane collects
+          # it — `misc` is a catch-all for tests/<dir>/ only. The s3 extra
+          # supplies botocore, which the storage tests import directly; the
+          # modal tests inject a fake SDK module and need no extra.
+          - group: science
+            paths: science/tests
+            extra: s3
+            cov: omnisci
 
     steps:
       - name: Check out repo
@@ -201,7 +209,7 @@ jobs:
               --dist=${{ matrix.dist || 'loadfile' }} \
               --timeout=${{ matrix.timeout || '300' }} \
               --junitxml=artifacts/pytest-${{ matrix.group }}.xml \
-              --cov=omnigent --cov-report= \
+              --cov=${{ matrix.cov || 'omnigent' }} --cov-report= \
               -v --tb=long --showlocals --log-level=INFO -r a \
               || { rc=$?; [ "$rc" -eq 5 ] && echo "::notice::No tests collected in this shard; treating as a pass." || exit "$rc"; }
 
