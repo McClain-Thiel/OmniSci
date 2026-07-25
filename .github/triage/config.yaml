@@ -32,7 +32,7 @@ prompt: |
   ```
   {
     "type": "bug" | "enhancement" | "documentation" | null,
-    "components": ["comp:server" | "comp:runner" | "comp:repr" | "comp:web-ui" | "comp:tui" | "comp:policies" | "comp:harnesses" | "comp:infra"],
+    "components": ["comp:server" | "comp:runner" | "comp:repr" | "comp:web-ui" | "comp:tui" | "comp:policies" | "comp:harnesses" | "comp:infra" | "comp:science-core" | "comp:compute" | "comp:sci-skills" | "comp:workbench-ui"],
     "priority": "P0-critical" | "P1-high" | "P2-medium" | "P3-low" | null,
     "needs_info": true | false,
     "help_wanted": true | false,
@@ -63,6 +63,14 @@ prompt: |
   - `comp:policies` — safety policies, guardrails
   - `comp:harnesses` — SDK harnesses (Claude, Cursor, Antigravity, etc.)
   - `comp:infra` — CI/CD, GitHub Actions workflows, Docker, deployment, packaging
+  - `comp:science-core` — the omnisci record layer: projects, tasks, research
+    logs, artifacts, approvals, provenance, export/import
+  - `comp:compute` — compute connectors (local, ssh, slurm, qsub, modal): job
+    submission, status, logs, staging, output collection
+  - `comp:sci-skills` — science skills registry and install, the Science agent
+    bundle and its background reviewer
+  - `comp:workbench-ui` — the science workbench UI: project panel and tabs,
+    provenance settings, artifact viewers
   Use an empty array `[]` if you cannot determine the component.
 
   **ranked_owners** — the AREAS section of the task prompt lists each area with

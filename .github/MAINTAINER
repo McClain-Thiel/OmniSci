@@ -1,24 +1,7 @@
-# Maintainers of omnigent-ai/omnigent
-# One bare GitHub username per line. Comments start with #.
-aravind-segu
-bbqiu
-ckcuslife-source
-daniellok-db
-dbczumar
-dennyglee
-dhruv0811
-Edwinhe03
-fanzeyi
-kerryspchang
-lisancao
-mahesh-venkatachalam
-mateiz
-newfront
-PattaraS
-SabhyaC26
-serena-ruan
-shivam5
-TomeHirata
-xq-yin
-hzub
-zhengwin
+# Maintainers of McClain-Thiel/OmniSci
+#
+# Read at main HEAD by maintainer-approval.yml, merge-ready/load-maintainers.sh,
+# e2e-ui-required/check.sh, and issue-triage.yml. One GitHub login per line.
+# Every owner in .github/areas.json must appear here (enforced by areas.test.js).
+
+McClain-Thiel
