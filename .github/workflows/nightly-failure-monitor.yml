@@ -23,6 +23,9 @@ permissions:
 jobs:
   monitor:
     name: monitor nightly result
+    # Upstream-only: the nightly e2e crons need gateway secrets this fork does
+    # not hold, so every scheduled run fails and would file a tracking issue.
+    if: github.repository == 'omnigent-ai/omnigent'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

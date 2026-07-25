@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   stale:
+    # Upstream-only: this fork tracks a long-lived roadmap backlog whose issues
+    # are expected to sit open for months.
+    if: github.repository == 'omnigent-ai/omnigent'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/stale@eb5cf3af3ac0a1aa4c9c45633dd1ae542a27a899 # v10.3.0
