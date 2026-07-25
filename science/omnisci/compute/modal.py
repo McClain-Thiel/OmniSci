@@ -276,10 +276,32 @@ class ModalComputeProvider:
                     else RunState.FAILED
                 )
                 record.update(status=state.value, exit_code=exit_code, finished_at=utcnow())
+            if record["status"] in _TERMINAL and record["status"] != RunState.SUCCEEDED.value:
+                self._release(sandbox, run.run_id, record)
             self._write_record(run.run_id, record)
             return self._status_from_record(record)
         finally:
             sandbox.detach()
+
+    def _release(self, sandbox, run_id: str, record: dict) -> None:
+        """Save the logs locally, then terminate a sandbox nothing will collect.
+
+        The wrapper parks on a sleep loop so ``collect`` can read the filesystem
+        after the command exits, and only a succeeded run is ever collected.
+        Any other terminal state would otherwise bill until Modal's own timeout
+        while producing nothing. The logs live on that filesystem, so they have
+        to come down before the sandbox goes away -- terminate regardless, since
+        a lost log is cheaper than an idling sandbox.
+        """
+        run_dir = self._run_dir(run_id)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            (run_dir / "stdout.log").write_text(self._read_remote_log(sandbox, STDOUT_PATH))
+            (run_dir / "stderr.log").write_text(self._read_remote_log(sandbox, STDERR_PATH))
+            record["logs_persisted"] = True
+        finally:
+            sandbox.terminate(wait=True)
+            record["sandbox_terminated"] = True
 
     def logs(self, run: RunReference, cursor: str | None = None) -> LogPage:
         record = self._read_record(run.run_id)
@@ -287,7 +309,8 @@ class ModalComputeProvider:
         stdout_path = run_dir / "stdout.log"
         stderr_path = run_dir / "stderr.log"
 
-        if record.get("collected") and stdout_path.exists() and stderr_path.exists():
+        persisted = record.get("collected") or record.get("logs_persisted")
+        if persisted and stdout_path.exists() and stderr_path.exists():
             stdout = stdout_path.read_text(errors="replace")
             stderr = stderr_path.read_text(errors="replace")
         else:
@@ -322,15 +345,15 @@ class ModalComputeProvider:
                 f"run {run.run_id} already terminal ({record['status']}); cannot cancel"
             )
         sandbox = self._lookup(run.provider_run_id)
-        try:
-            sandbox.terminate(wait=True)
-        finally:
-            sandbox.detach()
         record.update(
             status=RunState.CANCELLED.value,
             exit_code=137,
             finished_at=utcnow(),
         )
+        try:
+            self._release(sandbox, run.run_id, record)
+        finally:
+            sandbox.detach()
         self._write_record(run.run_id, record)
 
     def collect(self, run: RunReference) -> list[Artifact]:
@@ -388,6 +411,7 @@ class ModalComputeProvider:
 
             self._write_manifest(run.run_id, artifacts)
             sandbox.terminate(wait=True)
+            record["sandbox_terminated"] = True
             record["collected"] = True
             self._write_record(run.run_id, record)
             return artifacts

@@ -25,6 +25,11 @@ class FakeFilesystem:
         self.root = root
 
     def _local(self, remote: str) -> Path:
+        # A terminated sandbox takes its filesystem with it. Modelling that is
+        # what makes "save the logs before releasing it" a real assertion --
+        # a fake that stays readable after terminate() cannot catch losing them.
+        if self.sandbox.terminated:
+            raise RemoteNotFoundError(remote)
         return self.root / remote.removeprefix("/")
 
     def copy_from_local(self, local_path, remote_path: str) -> None:
@@ -287,16 +292,18 @@ def test_modal_stages_and_uploads_through_storage_broker(modal_project, tmp_path
     reference = provider.submit(provider.validate(spec))
     assert provider.status(reference).status == RunState.SUCCEEDED
 
+    # Staging is observable only while the sandbox is alive; collect() releases it.
+    sandbox = fake_modal.sandboxes[reference.provider_run_id]
+    assert sandbox.filesystem._local("/workspace/inputs/input.txt").read_bytes() == (
+        b"remote declared input\n"
+    )
+
     artifact = provider.collect(reference)[0]
 
     assert artifact.uri == "s3://science/results/results/out.json"
     uploaded, checksum = object_storage.uploads[artifact.uri]
     assert uploaded == b'{"difference": 2.5}\n'
     assert checksum == artifact.checksum_sha256
-    sandbox = fake_modal.sandboxes[reference.provider_run_id]
-    assert sandbox.filesystem._local("/workspace/inputs/input.txt").read_bytes() == (
-        b"remote declared input\n"
-    )
 
 
 def test_modal_timeout_exit_code_reconciles(modal_project, tmp_path):
@@ -310,6 +317,76 @@ def test_modal_timeout_exit_code_reconciles(modal_project, tmp_path):
     reference = provider.submit(provider.validate(modal_spec()))
 
     assert provider.status(reference).status == RunState.TIMEOUT
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "expected"),
+    [(1, RunState.FAILED), (124, RunState.TIMEOUT)],
+)
+def test_modal_releases_the_sandbox_on_a_terminal_failure(
+    modal_project, tmp_path, exit_code, expected
+):
+    """A run nothing will collect must not keep billing.
+
+    The wrapper parks on a sleep loop so ``collect`` can read the filesystem,
+    and only a succeeded run is ever collected -- so any other terminal state
+    used to idle until Modal's own runtime+grace timeout.
+    """
+    fake_modal = FakeModal(tmp_path / "remote", exit_code=exit_code)
+    provider = ModalComputeProvider(
+        project_dir=modal_project,
+        config={"collection_grace_seconds": 60},
+        modal_module=fake_modal,
+        storage_resolver=lambda _uri: LocalStorageProvider(modal_project),
+    )
+    reference = provider.submit(provider.validate(modal_spec()))
+    sandbox = fake_modal.sandboxes[reference.provider_run_id]
+
+    assert provider.status(reference).status == expected
+    assert sandbox.terminated
+
+    # The logs live on the sandbox filesystem, so they must be pulled down
+    # before it goes away -- a released run still has to be debuggable.
+    assert provider.logs(reference).content == "modal analysis complete\n"
+
+
+def test_modal_keeps_the_sandbox_alive_until_a_success_is_collected(modal_project, tmp_path):
+    """The mirror of the release test: success must NOT be torn down early,
+    because ``collect`` still has to read the declared outputs off it."""
+    fake_modal = FakeModal(tmp_path / "remote")
+    provider = ModalComputeProvider(
+        project_dir=modal_project,
+        config={"collection_grace_seconds": 60},
+        modal_module=fake_modal,
+        storage_resolver=lambda _uri: LocalStorageProvider(modal_project),
+    )
+    reference = provider.submit(provider.validate(modal_spec()))
+    sandbox = fake_modal.sandboxes[reference.provider_run_id]
+
+    assert provider.status(reference).status == RunState.SUCCEEDED
+    assert not sandbox.terminated
+
+    provider.collect(reference)
+    assert sandbox.terminated
+
+
+def test_modal_cancel_saves_logs_before_terminating(modal_project, tmp_path):
+    """Cancel used to terminate without pulling the logs down, so a cancelled
+    run lost them: ``logs`` would then read a filesystem that no longer exists."""
+    fake_modal = FakeModal(tmp_path / "remote", auto_finish=False)
+    provider = ModalComputeProvider(
+        project_dir=modal_project,
+        config={"collection_grace_seconds": 60},
+        modal_module=fake_modal,
+        storage_resolver=lambda _uri: LocalStorageProvider(modal_project),
+    )
+    reference = provider.submit(provider.validate(modal_spec()))
+    sandbox = fake_modal.sandboxes[reference.provider_run_id]
+    sandbox.filesystem.write_text("partial progress\n", "/tmp/omnisci-stdout.log")
+
+    provider.cancel(reference)
+    assert sandbox.terminated
+    assert provider.logs(reference).content == "partial progress\n"
 
 
 def test_modal_missing_remote_sandbox_reconciles_as_failed(modal_project, tmp_path):
