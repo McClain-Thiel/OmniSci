@@ -10,11 +10,13 @@ const maint = new Set(
     .split("\n").map((l) => l.replace(/#.*/, "").trim().toLowerCase()).filter(Boolean)
 );
 
-// The 8 comp:* labels that exist in the repo (gh cannot add a label that does not
+// The comp:* labels that exist in the repo (gh cannot add a label that does not
 // exist, and there is no label-sync). Every area label must be one of these.
+// The last four are this fork's science layer.
 const ALLOWED_LABELS = new Set([
   "comp:server", "comp:runner", "comp:repr", "comp:web-ui",
   "comp:tui", "comp:policies", "comp:harnesses", "comp:infra",
+  "comp:science-core", "comp:compute", "comp:sci-skills", "comp:workbench-ui",
 ]);
 
 let failures = 0;
@@ -32,11 +34,12 @@ for (const a of areas)
 for (const a of areas)
   assert(`area ${a.key} label ${a.label} is a real comp:*`, ALLOWED_LABELS.has(a.label));
 
-// Every area has >= 2 owners (the 2+ codeowner requirement). Paused owners
-// still count -- pausing someone must not force adding a new active owner.
+// Every area has an owner. Upstream requires 2+; this fork has a single
+// maintainer, so the floor is 1 -- raise it again when a second one appears.
+// Paused owners still count: pausing someone must not force adding a new one.
 for (const a of areas) {
   const n = (a.owners || []).length + (a.owners_paused || []).length;
-  assert(`area ${a.key} has >= 2 owners`, n >= 2, `${n} owner(s)`);
+  assert(`area ${a.key} has >= 1 owner`, n >= 1, `${n} owner(s)`);
 }
 
 // Every area has a definition and at least one path.
@@ -52,15 +55,21 @@ function resolve(fn) {
   for (const a of areas) for (const p of a.paths) if (fn.startsWith(p)) match = a;
   return match;
 }
+// Ordering-sensitive cases: each carve-out must beat the general prefix it
+// narrows, and each general prefix must still win for everything else.
 const cases = [
-  ["omnigent/inner/foo.py", "inner"],
-  ["omnigent/inner/claude_sdk_executor.py", "harness-claude"],
-  ["omnigent/inner/kimi_executor.py", "harness-kimi"],
-  ["omnigent/inner/kiro_native_harness.py", "harness-kiro"],
-  ["web/src/main.tsx", "web"],
-  ["web/ios/App.swift", "mobile-app"],
-  ["web/electron/main.ts", "desktop-app"],
+  ["omnigent/inner/claude_sdk_executor.py", "harnesses"],
   ["omnigent/server/api.py", "server"],
+  ["omnigent/server/routes/science.py", "science-core"],
+  ["web/src/main.tsx", "web"],
+  ["web/src/components/science/SciencePanel.tsx", "workbench-ui"],
+  ["web/src/shell/CsvTableViewer.tsx", "workbench-ui"],
+  ["science/omnisci/service.py", "science-core"],
+  ["science/omnisci/compute/modal.py", "compute"],
+  ["science/omnisci/skills/install.py", "sci-skills"],
+  ["science/tests/test_compute_ssh.py", "compute"],
+  ["science/tests/test_repository.py", "science-core"],
+  ["examples/science/config.yaml", "sci-skills"],
 ];
 for (const [fn, key] of cases) {
   const m = resolve(fn);
