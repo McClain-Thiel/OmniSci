@@ -261,8 +261,8 @@ class SshComputeProvider:
             f"{shlex.join(plan.command)}"
         )
         try:
-            completed = self._run_command(
-                [*self._ssh_command(), remote_command],
+            completed = self._ssh_run(
+                remote_command,
                 capture_output=True,
                 timeout=runtime_seconds + self.connect_timeout_seconds + 15,
             )
@@ -343,8 +343,8 @@ class SshComputeProvider:
                 f"{shlex.join(outputs)}"
             )
             with archive.open("wb") as stream:
-                completed = self._run_command(
-                    [*self._ssh_command(), remote_command],
+                completed = self._ssh_run(
+                    remote_command,
                     stdout=stream,
                     stderr=subprocess.PIPE,
                     timeout=self.connect_timeout_seconds + 60,
@@ -429,8 +429,8 @@ class SshComputeProvider:
         return [Artifact(run_id=run_id, **entry) for entry in entries]
 
     def _checked_ssh(self, remote_command: str) -> None:
-        completed = self._run_command(
-            [*self._ssh_command(), remote_command],
+        completed = self._ssh_run(
+            remote_command,
             capture_output=True,
             timeout=self.connect_timeout_seconds + 60,
         )
@@ -471,6 +471,25 @@ class SshComputeProvider:
             *self._common_options(port_flag="-p"),
             f"{self.user}@{self.host}",
         ]
+
+    def _ssh_run(self, script: str, **kwargs) -> subprocess.CompletedProcess:
+        """Run a POSIX script on the remote host whatever its login shell is.
+
+        ``ssh host 'script'`` hands the string to the account's *login* shell,
+        and university clusters commonly issue csh/tcsh -- which rejects
+        ``if ...; then ...; fi``, ``cmd || { ...; }`` and ``var=$(...)`` as
+        syntax errors. Staging still succeeds, so the failure surfaces later as
+        a baffling "if: Expression Syntax" on the first status poll.
+
+        Naming ``/bin/sh`` as the remote command and feeding the script on stdin
+        sidesteps the login shell *and* its quoting rules: passing the script as
+        an argument instead would still have to survive csh's own parser, which
+        mangles the quoting. stdin is otherwise unused, so this leaves stdout
+        free for the output tar stream.
+        """
+        return self._run_command(
+            [*self._ssh_command(), "/bin/sh"], input=script.encode(), **kwargs
+        )
 
     def _common_options(self, *, port_flag: str) -> list[str]:
         options = [
