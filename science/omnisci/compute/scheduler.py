@@ -15,6 +15,7 @@ from omnisci.compute.base import (
     ExecutionSpec,
     LogPage,
     ProviderCapabilities,
+    ProviderCheck,
     RunReference,
     RunStatus,
 )
@@ -48,6 +49,82 @@ class SchedulerComputeProvider(SshComputeProvider, ABC):
                 }
             },
         )
+
+    #: Binaries this provider drives, and the marker that identifies the flavour.
+    required_commands: tuple[str, ...] = ()
+
+    def check(self) -> ProviderCheck:
+        """Connectivity, then whether this login node actually runs a scheduler.
+
+        Reaching the host proves nothing for a scheduler provider: a cluster
+        gateway may be a pure jump host with no ``qsub`` on it at all, and a
+        site may run Grid Engine where the configuration claims PBS. Both only
+        showed up as a failed submission or a job that queued forever.
+        """
+        connectivity = super().check()
+        if not connectivity.ok:
+            return connectivity
+
+        probe = "; ".join(
+            f'printf "{command}=%s\\n" "$(command -v {command} 2>/dev/null || printf -)"'
+            for command in (*self.required_commands, "qconf", "pbsnodes")
+        )
+        try:
+            completed = self._ssh_run(
+                probe, capture_output=True, timeout=self.connect_timeout_seconds + 30
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return self._failed_check("unreachable", str(exc), "")
+
+        found = {}
+        for line in self._output_bytes(completed.stdout).decode(errors="replace").splitlines():
+            name, _, path = line.partition("=")
+            found[name.strip()] = path.strip()
+
+        missing = [c for c in self.required_commands if found.get(c, "-") == "-"]
+        if missing:
+            return self._failed_check(
+                "missing_dependency",
+                f"{', '.join(missing)} not found on {self.host}",
+                f"{self.host} does not appear to run {self.name}. Cluster gateways are often "
+                f"jump hosts with no scheduler; point the connector at the submit/login node.",
+            )
+
+        observed = {
+            **self._observed(),
+            "scheduler_paths": {c: found[c] for c in self.required_commands},
+        }
+        detected = (
+            "sge"
+            if found.get("qconf", "-") != "-"
+            else ("pbs" if found.get("pbsnodes", "-") != "-" else None)
+        )
+        if detected:
+            observed["detected_dialect"] = detected
+        mismatch = self._dialect_mismatch(detected)
+        if mismatch:
+            return ProviderCheck(
+                provider=self.name,
+                status="misconfigured",
+                detail=mismatch[0],
+                remedy=mismatch[1],
+                checked_at=utcnow(),
+                observed=observed,
+            )
+        return ProviderCheck(
+            provider=self.name,
+            status="ok",
+            detail=f"{self.name} reachable on {self.host}",
+            checked_at=utcnow(),
+            observed=observed,
+        )
+
+    def _dialect_mismatch(self, _detected: str | None) -> tuple[str, str] | None:
+        """Subclasses that carry a dialect setting report a disagreement here.
+
+        Slurm has no dialect to get wrong, so the base answer is always None.
+        """
+        return None
 
     def validate(self, spec: ExecutionSpec) -> ExecutionPlan:
         details = spec.spec
@@ -393,6 +470,7 @@ class SchedulerComputeProvider(SshComputeProvider, ABC):
 
 class SlurmComputeProvider(SchedulerComputeProvider):
     name = "slurm"
+    required_commands = ("sbatch", "squeue", "scancel")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -521,6 +599,7 @@ class SlurmComputeProvider(SchedulerComputeProvider):
 
 class QsubComputeProvider(SchedulerComputeProvider):
     name = "qsub"
+    required_commands = ("qsub", "qstat", "qdel")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -533,6 +612,17 @@ class QsubComputeProvider(SchedulerComputeProvider):
         self.parallel_environment = self._optional_directive("parallel_environment") or "smp"
         self.gpu_resource = self._optional_directive("gpu_resource") or (
             "ngpus" if self.dialect == "pbs" else "gpu"
+        )
+
+    def _dialect_mismatch(self, _detected: str | None) -> tuple[str, str] | None:
+        detected = _detected
+        if detected is None or detected == self.dialect:
+            return None
+        return (
+            f"configured dialect is '{self.dialect}' but {self.host} runs {detected.upper()}",
+            f"Set dialect: {detected} on this connector. The two emit different directives, "
+            f"and the wrong ones are silently ignored -- the job queues but never gets the "
+            f"resources it asked for.",
         )
 
     def _render_job_script(self, plan: ExecutionPlan, record: dict) -> str:

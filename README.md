@@ -135,6 +135,9 @@ agent runtime or general-purpose tool broker.
   <img src="docs/images/omnisci-provenance.jpg" alt="OmniSci provenance service settings" width="100%">
 </p>
 
+Running jobs on a cluster? See [the HPC guide](docs/HPC.md) for SSH, scheduler,
+and shared-filesystem setup.
+
 See [the concise product requirements](docs/OMNISCI_PRD.md) for the intended
 behavior and [the fork delta](FORK_DELTA.md) for changes relative to
 [OmniGent](https://github.com/omnigent-ai/omnigent).

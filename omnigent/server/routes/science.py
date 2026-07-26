@@ -382,6 +382,21 @@ def create_science_router(*, auth_provider: AuthProvider | None = None) -> APIRo
         _require_user(request, auth_provider)
         return _dump(_service(project).job_providers())
 
+    @router.post("/science/compute:check")
+    @_endpoint
+    def check_compute(
+        request: Request,
+        project: str = Query(...),
+        provider: str | None = Query(default=None),
+    ) -> Any:
+        """Probe compute connectors and report why any cannot be used.
+
+        Configuration alone does not prove a connector works; this is what the
+        workbench calls behind "Test connection".
+        """
+        _require_user(request, auth_provider)
+        return _dump(_service(project).check_compute(provider))
+
     @router.post("/science/jobs:validate")
     @_endpoint
     def validate_job(

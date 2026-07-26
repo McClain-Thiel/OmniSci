@@ -25,6 +25,7 @@ from omnisci.compute.base import (
     ExecutionSpec,
     LogPage,
     ProviderCapabilities,
+    ProviderCheck,
     RunReference,
     RunStatus,
 )
@@ -123,6 +124,92 @@ class SshComputeProvider:
                 }
             },
         )
+
+    def check(self) -> ProviderCheck:
+        """Probe whether this connector can be used right now.
+
+        Configuration alone proves nothing: a key can be unauthorized, a host
+        key can be missing, a VPN can be down, or a multiplexed session can
+        expire. Without this the first sign of trouble is a failed job
+        submission reporting raw ssh stderr, which does not say what to fix.
+        """
+        try:
+            completed = self._ssh_run(
+                "printf omnisci-ok\n",
+                capture_output=True,
+                timeout=self.connect_timeout_seconds + 15,
+            )
+        except subprocess.TimeoutExpired:
+            return self._failed_check(
+                "unreachable",
+                f"no response from {self.host} within {self.connect_timeout_seconds + 15}s",
+                "Check the host is up and that you are on any VPN it requires.",
+            )
+        except OSError as exc:
+            return self._failed_check("unreachable", str(exc), "Check the ssh client is usable.")
+
+        if completed.returncode == 0 and b"omnisci-ok" in self._output_bytes(completed.stdout):
+            return ProviderCheck(
+                provider=self.name,
+                status="ok",
+                detail=f"{self.user}@{self.host} reachable",
+                checked_at=utcnow(),
+                observed=self._observed(),
+            )
+        return self._classify_ssh_failure(
+            self._output_bytes(completed.stderr).decode(errors="replace").strip()
+        )
+
+    def _classify_ssh_failure(self, stderr: str) -> ProviderCheck:
+        """Turn ssh's stderr into a named cause and a concrete next step."""
+        lowered = stderr.lower()
+        if "host key verification failed" in lowered or "no matching host key" in lowered:
+            return self._failed_check(
+                "misconfigured",
+                stderr,
+                f"The host key for {self.host} is not in {self.known_hosts_file}. "
+                f"Connect once by hand (`ssh {self.host}`) to record it.",
+            )
+        if "permission denied" in lowered or "publickey" in lowered:
+            return self._failed_check(
+                "auth_failed",
+                stderr,
+                # BatchMode is deliberate -- a background poller must never sit
+                # on a password prompt -- so an interactive-only host needs a
+                # session opened out of band that OpenSSH can then reuse.
+                f"OmniSci connects non-interactively, so it cannot answer a password or "
+                f"MFA prompt. If {self.host} requires one, run `ssh {self.host}` yourself "
+                f"and keep it open; with ControlMaster/ControlPersist in your SSH config "
+                f"OmniSci will reuse that session.",
+            )
+        if any(s in lowered for s in ("could not resolve", "name or service not known")):
+            return self._failed_check(
+                "unreachable",
+                stderr,
+                f"{self.host} does not resolve. If it is an ~/.ssh/config alias, check the "
+                f"Host block; otherwise check DNS or your VPN.",
+            )
+        if any(s in lowered for s in ("connection refused", "timed out", "no route to host")):
+            return self._failed_check(
+                "unreachable",
+                stderr,
+                f"Could not reach {self.host}:{self.port}. Check the host is up and that "
+                f"you are on any VPN it requires.",
+            )
+        return self._failed_check("misconfigured", stderr or "ssh failed with no output", "")
+
+    def _failed_check(self, status: str, detail: str, remedy: str) -> ProviderCheck:
+        return ProviderCheck(
+            provider=self.name,
+            status=status,  # type: ignore[arg-type]
+            detail=detail,
+            remedy=remedy,
+            checked_at=utcnow(),
+        )
+
+    def _observed(self) -> dict:
+        """Facts worth reporting once connected. Subclasses add scheduler detail."""
+        return {"host": self.host, "user": self.user, "remote_root": self.remote_root.as_posix()}
 
     def validate(self, spec: ExecutionSpec) -> ExecutionPlan:
         details = spec.spec

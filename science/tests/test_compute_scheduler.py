@@ -269,3 +269,93 @@ def test_scheduler_validation_rejects_unsupported_specs(scheduler_project, sched
         provider.validate(scheduler_spec("slurm", network={"mode": "deny"}))
     with pytest.raises(StateError, match="CPU request must be positive"):
         provider.validate(scheduler_spec("slurm", resources={"cpu": 0}))
+
+
+def _check_runner(*, connect_rc=0, connect_stderr=b"", found=None):
+    """Runner that answers the connectivity probe, then the binary probe."""
+
+    def run(command, **kwargs):
+        script = _remote_script(command, **kwargs)
+        if "omnisci-ok" in script:
+            return SimpleNamespace(
+                returncode=connect_rc,
+                stdout=b"omnisci-ok" if connect_rc == 0 else b"",
+                stderr=connect_stderr,
+            )
+        lines = "".join(f"{name}={path}\n" for name, path in (found or {}).items())
+        return SimpleNamespace(returncode=0, stdout=lines.encode(), stderr=b"")
+
+    return run
+
+
+def test_check_reports_auth_failure_with_an_interactive_login_remedy(
+    scheduler_project, scheduler_config
+):
+    """A rejected key must name the cause and the way out, not echo raw stderr.
+
+    OmniSci connects with BatchMode, so a host behind a password or MFA prompt
+    can only be reached through a session the operator opens themselves.
+    """
+    provider = QsubComputeProvider(
+        project_dir=scheduler_project,
+        config=scheduler_config,
+        command_runner=_check_runner(
+            connect_rc=255,
+            connect_stderr=b"athiel@login: Permission denied (publickey,password).",
+        ),
+    )
+    check = provider.check()
+    assert check.status == "auth_failed"
+    assert not check.ok
+    assert "ssh login.example.edu" in check.remedy
+    assert "ControlMaster" in check.remedy
+
+
+def test_check_reports_a_missing_scheduler_rather_than_queueing_forever(
+    scheduler_project, scheduler_config
+):
+    """A reachable host with no scheduler is the classic jump-host mistake."""
+    provider = SlurmComputeProvider(
+        project_dir=scheduler_project,
+        config=scheduler_config,
+        command_runner=_check_runner(
+            found={"sbatch": "-", "squeue": "-", "scancel": "-", "qconf": "-", "pbsnodes": "-"}
+        ),
+    )
+    check = provider.check()
+    assert check.status == "missing_dependency"
+    assert "sbatch" in check.detail
+    assert "jump host" in check.remedy
+
+
+def test_check_flags_a_dialect_that_disagrees_with_the_cluster(
+    scheduler_project, scheduler_config
+):
+    """`pbs` is the default, so pointing it at a Grid Engine site is the likely
+    first mistake -- and the wrong directives are silently ignored."""
+    sge_host = _check_runner(
+        found={
+            "qsub": "/opt/sge/bin/qsub",
+            "qstat": "/opt/sge/bin/qstat",
+            "qdel": "/opt/sge/bin/qdel",
+            "qconf": "/opt/sge/bin/qconf",
+            "pbsnodes": "-",
+        }
+    )
+    wrong = QsubComputeProvider(
+        project_dir=scheduler_project,
+        config={**scheduler_config, "dialect": "pbs"},
+        command_runner=sge_host,
+    )
+    check = wrong.check()
+    assert check.status == "misconfigured"
+    assert "runs SGE" in check.detail
+    assert "dialect: sge" in check.remedy
+    assert check.observed["detected_dialect"] == "sge"
+
+    right = QsubComputeProvider(
+        project_dir=scheduler_project,
+        config={**scheduler_config, "dialect": "sge"},
+        command_runner=sge_host,
+    )
+    assert right.check().ok

@@ -30,6 +30,7 @@ from omnisci.compute.base import (
     ExecutionSpec,
     LogPage,
     ProviderCapabilities,
+    ProviderCheck,
     RunReference,
     RunStatus,
 )
@@ -132,6 +133,21 @@ class LocalComputeProvider:
                     "synchronous": True,
                 }
             },
+        )
+
+    def check(self) -> ProviderCheck:
+        """Local execution has nothing to reach, so this only reports sandbox availability."""
+        sandboxed = local_sandbox_available()
+        return ProviderCheck(
+            provider=self.name,
+            status="ok",
+            detail="local process execution available"
+            + ("" if sandboxed else " (no OS sandbox on this host)"),
+            remedy=""
+            if sandboxed
+            else "Install sandbox-exec (macOS) or bwrap (Linux) to run jobs with mode=sandbox.",
+            checked_at=utcnow(),
+            observed={"sandbox_available": sandboxed, "cpu_count": os.cpu_count() or 1},
         )
 
     def validate(self, spec: ExecutionSpec) -> ExecutionPlan:
