@@ -51,6 +51,7 @@ landed as one foundation series and a shared table row would conflict five ways.
 | `.github/ISSUE_TEMPLATE/bug_report.yml` | Version instructions assumed an installed `omnigent` binary. |
 | `README.md`, `CONTRIBUTING.md` | Link the new HPC guide from the front page and the contributor entry point. |
 | `CONTRIBUTING.md` | Rebranded, and adds what upstream's lacks: how to find work, how to claim an issue, how to run the science suites, the `FORK_DELTA` rule, and the permanent-fork statement. Drops the DCO sign-off requirement with the check. |
+| `openapi.json` | Generated artifact, checked in and compared byte-for-byte by `tests/server/test_openapi_drift.py`. Regenerated whenever the science router gains a route. |
 | `RELEASING.md` | Upstream's process publishes from an access-controlled repository this fork cannot reach; replaced with a statement that this fork ships no artifacts, plus the pin-bump procedure. |
 
 ## Added files (not upstream)
