@@ -47,6 +47,7 @@ landed as one foundation series and a shared table row would conflict five ways.
 | `.github/workflows/stale.yml` | Unguarded daily cron would auto-close this fork's long-lived roadmap backlog. |
 | `.github/workflows/nightly-failure-monitor.yml` | Unguarded; the nightly e2e crons need gateway secrets this fork lacks, so it would file spurious tracking issues against a hardcoded upstream assignee. |
 | `.github/scripts/rotation*`, `.github/workflows/discord-watch-rotation*.yml` | **Deleted.** Carried real people's names, Slack member IDs, and timezones for upstream's internal on-call rotation. |
+| `.github/scripts/e2e-ui-required/check.sh` | The gate's LLM judge needs a gateway secret this fork does not hold, so `curl` failed and the check failed closed on every `web/**` PR. Degrade cleanly when no credentials are configured, as issue-triage and polly-review already do. |
 | `.github/ISSUE_TEMPLATE/config.yml` | Pointed contributors at the upstream Discussions tab; repointed here and added a backlog link. |
 | `.github/ISSUE_TEMPLATE/bug_report.yml` | Version instructions assumed an installed `omnigent` binary. |
 | `CONTRIBUTING.md` | Rebranded, and adds what upstream's lacks: how to find work, how to claim an issue, how to run the science suites, the `FORK_DELTA` rule, and the permanent-fork statement. Drops the DCO sign-off requirement with the check. |

@@ -140,6 +140,16 @@ REQ_BODY=$(jq -n \
   '{model: $model, temperature: 0, max_tokens: 200,
     messages: [{role: "system", content: $sys}, {role: "user", content: $user}]}')
 
+# No judge credentials configured -> there is nothing to ask, and failing
+# closed would block every web/** PR on this fork forever rather than
+# occasionally. Defer to the required `Maintainer Approval` check, which the
+# script's own header already names as the thing that actually gates merge.
+# Matches how issue-triage.yml and polly-review.yml degrade without a key.
+if [[ -z "${OPENAI_API_KEY:-}" || -z "${OPENAI_BASE_URL:-}" ]]; then
+  pass "PASS: e2e_ui judge not configured on this repository (no LLM credentials); \
+UI-test coverage is left to maintainer review."
+fi
+
 set +e
 RESP=$(curl -sS --fail-with-body --max-time 90 \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
