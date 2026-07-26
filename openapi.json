@@ -7956,6 +7956,65 @@
         ]
       }
     },
+    "/v1/science/compute:check": {
+      "post": {
+        "description": "Probe compute connectors and report why any cannot be used.\n\nConfiguration alone does not prove a connector works; this is what the\nworkbench calls behind \"Test connection\".",
+        "operationId": "check_compute_v1_science_compute_check_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "title": "Project",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Check Compute V1 Science Compute Check Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Compute",
+        "tags": [
+          "science"
+        ]
+      }
+    },
     "/v1/science/infrastructure": {
       "get": {
         "description": "Reusable app-level compute and storage connector definitions.",
