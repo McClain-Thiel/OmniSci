@@ -13,6 +13,21 @@ from omnisci.domain.schemas import RunState
 from omnisci.errors import StateError
 
 
+def _remote_script(command: list[str], **kwargs) -> str:
+    """Recover the script an ssh call carries, asserting the POSIX shape holds.
+
+    The provider names ``/bin/sh`` as the remote command and pipes the script on
+    stdin, so the account's login shell never parses it -- csh/tcsh accounts,
+    common on university clusters, reject POSIX syntax outright and even mangle
+    the quoting of a ``-c`` argument. Asserting the shape here makes this
+    harness a regression guard for that.
+    """
+    if command[0] != "ssh":
+        return ""
+    assert command[-1] == "/bin/sh", f"remote command not run under /bin/sh: {command}"
+    return (kwargs.get("input") or b"").decode()
+
+
 class FakeSshRunner:
     def __init__(
         self,
@@ -25,11 +40,13 @@ class FakeSshRunner:
         self.archive_name = archive_name
         self.cleanup_failures = cleanup_failures
         self.commands: list[list[str]] = []
+        self.scripts: list[str] = []
         self.staged_names: list[str] = []
 
     def __call__(self, command, **kwargs):
         self.commands.append(command)
-        remote_command = command[-1] if command[0] == "ssh" else ""
+        remote_command = _remote_script(command, **kwargs)
+        self.scripts.append(remote_command)
         if command[0] == "scp":
             with tarfile.open(command[-2], "r:gz") as archive:
                 self.staged_names = archive.getnames()
@@ -126,7 +143,7 @@ def test_ssh_submit_logs_collect_and_restart(ssh_project, ssh_config):
     assert len(artifacts) == 1
     assert artifacts[0].path == "results/out.json"
     assert (ssh_project / "results" / "out.json").read_text() == '{"host": "ssh-test"}\n'
-    assert any("rm -rf -- /tmp/omnisci-tests/run_" in command[-1] for command in runner.commands)
+    assert any("rm -rf -- /tmp/omnisci-tests/run_" in script for script in runner.scripts)
 
     restarted = SshComputeProvider(
         project_dir=ssh_project,
@@ -214,7 +231,7 @@ def test_ssh_uses_configured_runtime_as_implicit_limit(ssh_project, ssh_config):
     reference = provider.submit(provider.validate(ssh_spec(limits={})))
 
     assert provider.status(reference).status == RunState.SUCCEEDED
-    assert any("timeout --signal=TERM --kill-after=5s 900s" in cmd[-1] for cmd in runner.commands)
+    assert any("timeout --signal=TERM --kill-after=5s 900s" in script for script in runner.scripts)
 
 
 def test_ssh_configuration_requires_known_host_file(ssh_project, ssh_config):

@@ -307,8 +307,8 @@ class SchedulerComputeProvider(SshComputeProvider, ABC):
             )
 
     def _remote_command(self, remote_command: str, *, operation: str):
-        completed = self._run_command(
-            [*self._ssh_command(), remote_command],
+        completed = self._ssh_run(
+            remote_command,
             capture_output=True,
             timeout=self.connect_timeout_seconds + 60,
         )
@@ -547,6 +547,10 @@ class QsubComputeProvider(SchedulerComputeProvider):
         resources = spec.spec.resources
         directives = [
             f"#PBS -N {self._job_name(spec)}",
+            # PBS runs the job under the account's login shell unless told
+            # otherwise, which would reject this script's POSIX body on a
+            # csh/tcsh account. The shebang alone is not enough.
+            "#PBS -S /bin/sh",
             f"#PBS -o {record['stdout_file']}",
             f"#PBS -e {record['stderr_file']}",
             f"#PBS -l walltime={self._walltime(self._runtime_minutes(spec))}",
@@ -577,6 +581,9 @@ class QsubComputeProvider(SchedulerComputeProvider):
         resources = spec.spec.resources
         directives = [
             f"#$ -N {self._job_name(spec)}",
+            # Same reason as the PBS branch: Grid Engine otherwise runs the
+            # script under the account's login shell.
+            "#$ -S /bin/sh",
             f"#$ -o {record['stdout_file']}",
             f"#$ -e {record['stderr_file']}",
             "#$ -cwd",

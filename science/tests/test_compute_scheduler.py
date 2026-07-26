@@ -13,10 +13,26 @@ from omnisci.domain.schemas import RunState
 from omnisci.errors import StateError
 
 
+def _remote_script(command: list[str], **kwargs) -> str:
+    """Recover the script an ssh call carries, asserting the POSIX shape holds.
+
+    The provider names ``/bin/sh`` as the remote command and pipes the script on
+    stdin, so the account's login shell never parses it -- csh/tcsh accounts,
+    common on university clusters, reject POSIX syntax outright and even mangle
+    the quoting of a ``-c`` argument. Asserting the shape here makes this
+    harness a regression guard for that.
+    """
+    if command[0] != "ssh":
+        return ""
+    assert command[-1] == "/bin/sh", f"remote command not run under /bin/sh: {command}"
+    return (kwargs.get("input") or b"").decode()
+
+
 class FakeSchedulerRunner:
     def __init__(self, scheduler: str):
         self.scheduler = scheduler
         self.commands: list[list[str]] = []
+        self.scripts: list[str] = []
         self.job_script = ""
         self.scheduler_state = "PENDING" if scheduler == "slurm" else "Q"
         self.exit_code: int | None = None
@@ -25,7 +41,8 @@ class FakeSchedulerRunner:
 
     def __call__(self, command, **kwargs):
         self.commands.append(command)
-        remote_command = command[-1] if command[0] == "ssh" else ""
+        remote_command = _remote_script(command, **kwargs)
+        self.scripts.append(remote_command)
         if command[0] == "scp":
             source = Path(command[-2])
             if source.name == "job.sh":
@@ -216,7 +233,7 @@ def test_scheduler_cancel_uses_native_command(
 
     assert provider.status(reference).status == RunState.CANCELLED
     expected = "scancel 4815" if scheduler == "slurm" else "qdel 8123.server"
-    assert any(command[-1] == expected for command in runner.commands)
+    assert any(script == expected for script in runner.scripts)
 
 
 def test_scheduler_rejects_unsafe_directives_and_job_ids(scheduler_project, scheduler_config):
@@ -230,7 +247,7 @@ def test_scheduler_rejects_unsafe_directives_and_job_ids(scheduler_project, sche
     original = runner.__call__
 
     def malformed_job_id(command, **kwargs):
-        if command[0] == "ssh" and command[-1].startswith("sbatch --parsable"):
+        if _remote_script(command, **kwargs).startswith("sbatch --parsable"):
             return SimpleNamespace(returncode=0, stdout=b"4815; rm -rf /\n", stderr=b"")
         return original(command, **kwargs)
 
