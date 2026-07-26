@@ -306,7 +306,64 @@ lockfile, and rollback. Only the CLI can drive it.
 
 ---
 
-## 10. New connectors
+## 10. Scheduler connectors on a real cluster
+
+Findings from the first run against a real scheduler (UCL cs-hpc, Grid Engine
+8.1.9). Everything here was invisible to the unit suite and to the AWS host the
+earlier "qsub" runs used, because that host runs bash and had a stubbed `qsub`
+that returned a `.fixture` job id.
+
+**Validated against the real scheduler:** staging over SSH, SGE directive
+generation, submission and job-id parsing, `_query_sge` mapping real `qstat`
+output, restart reconciliation from disk, `qdel` cancellation with terminal-state
+persistence, and remote cleanup.
+
+**Still unvalidated**, because a 1-slot test job sat in `qw` for over two hours
+behind ~424 pending jobs: the `qw -> r` transition, the exit-code protocol
+executing on a compute node, `qacct` accounting fallback, log retrieval and
+output collection from a compute node, and walltime/memory enforcement.
+
+- [x] **Fixed — remote commands ran under the login shell.** `ssh host '<script>'`
+      hands the string to the login shell; the cluster gateway issues `/bin/csh`,
+      which rejects `if ...; then ...; fi`, `cmd || { ...; }`, and `var=$(...)`.
+      Staging succeeded and every status poll then died with `if: Expression
+      Syntax`. Fixed by naming `/bin/sh` as the remote command and piping the
+      script on stdin, plus `-S /bin/sh` on generated job scripts. **verified**
+- [ ] **P0 — `remote_root` defaults to `/tmp/omnisci`, which is node-local.**
+      (`science/omnisci/compute/ssh.py:36`) Correct for the ssh provider, where
+      submission and execution are the same machine. Wrong for anything going
+      through a scheduler: the job lands on a compute node whose `/tmp` is not
+      the login node's, so the working directory is missing and outputs cannot
+      be collected. A user following the docs hits a confusing failure. The
+      scheduler providers should require an explicit shared-filesystem
+      `remote_root` in `validate()` rather than silently inheriting a node-local
+      default. **verified** — had to hand-pick a home-directory path to get a
+      job to run at all.
+- [ ] **P1 — Nothing reports whether a job can ever be scheduled.** A first
+      submission sat unschedulable indefinitely because the chosen queue is
+      `qtype INTERACTIVE` on all but one host, so a batch job could never run
+      there. Grid Engine answers this in one call — `qalter -w v` returns
+      "found possible assignment" or the reason it cannot — and Slurm and PBS
+      have equivalents. Surfacing that verdict is worth more than any progress
+      indicator: it converts an indefinite wait into an immediate, actionable
+      error.
+- [ ] **P2 — Optionally surface queue position.** `qstat -u "*" -s p` gives the
+      pending list, and position is the line index; measured live at 430 pending
+      / #11 / 460 running. Two caveats. It must be **one query per cluster**, not
+      per run — the per-run `_sync_run` fan-out in section 2 would multiply it.
+      And position is **not** a predictor: observed drifting *backwards* (10 ->
+      12 -> 13 jobs ahead) within minutes as higher-priority work was inserted,
+      because SGE schedules on priority and fit rather than FIFO. Show position
+      if useful, but deriving an ETA from it would be exactly the fabricated
+      number the PRD forbids.
+- [ ] **P2 — The `dialect` default is `pbs`, but the cluster to hand is SGE.**
+      Nothing detects which is present. `qconf`/`pbsnodes` presence distinguishes
+      them in one call; guessing wrong produces directives the scheduler silently
+      ignores.
+
+---
+
+## 11. New connectors
 
 - [ ] **P1 — Add an Anyscale / Ray connector.** Judged against the connector
       contract, Ray's job submission API is a better fit than what already
@@ -327,7 +384,7 @@ lockfile, and rollback. Only the CLI can drive it.
 
 ---
 
-## 11. Project identity
+## 12. Project identity
 
 A project is a folder with `.omnisci/` inside it, and there is no manifest —
 `project.yaml` was deliberately removed and the PRD forbids requiring one. That
@@ -358,7 +415,7 @@ string and nothing else.
 
 ---
 
-## 12. Layer boundary
+## 13. Layer boundary
 
 The line: the **tool layer** (OmniGent) is capability and knows nothing about
 science; the **science layer** (OmniSci) is record and authorization and never
@@ -382,7 +439,7 @@ scientific fact should *result in* a science record, not be proxied by one.
 
 ---
 
-## 13. Onboarding for non-programmers
+## 14. Onboarding for non-programmers
 
 Every OmniGent concept that reaches a bench scientist unchanged is a bug in the
 science layer. The science layer is where programmer concepts get compiled away,
@@ -432,7 +489,7 @@ looks like a missing feature is missing wiring.
 
 ---
 
-## 14. Decisions taken
+## 15. Decisions taken
 
 Recorded so the reasoning survives the people who were in the room.
 
@@ -460,8 +517,11 @@ Recorded so the reasoning survives the people who were in the room.
   Deferring a hard ceiling until §3's measurement task has numbers. (§3)
 - How much write access does the agent get to its own configuration? The
   sequencing recommendation is skills → connectors → harnesses, mediated by the
-  existing approval system, but the policy call has not been made. (§13)
+  existing approval system, but the policy call has not been made. (§14)
 - Are skill sources per-project or app-level? Connectors are app-level; sources
   currently are not. (§9)
 - Do Anyscale and Slurm present as one "cluster" concept to a researcher, or
-  two providers? (§10)
+  two providers? (§11)
+- Should the scheduler providers auto-detect PBS vs SGE, or require the
+  dialect to be declared? Guessing wrong emits directives the scheduler
+  silently ignores. (§10)
