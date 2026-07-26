@@ -123,6 +123,30 @@ class ProviderCapabilities(BaseModel):
     extensions: dict[str, dict] = Field(default_factory=dict)
 
 
+class ProviderCheck(BaseModel):
+    """Result of probing whether a configured connector can actually be used.
+
+    Static configuration says nothing about reachability: a host can be down, a
+    key can be unauthorized, a multiplexed session can expire, or a cluster can
+    simply lack the scheduler binaries. Those only surfaced when a job was
+    submitted and failed, so ``status`` names the failure kind and ``remedy``
+    says what the operator should do about it.
+    """
+
+    provider: str
+    status: Literal["ok", "auth_failed", "unreachable", "missing_dependency", "misconfigured"]
+    detail: str = ""
+    remedy: str = ""
+    checked_at: str = ""
+    # Facts worth reporting once we are connected -- e.g. the scheduler dialect
+    # actually present, which the operator otherwise has to declare blind.
+    observed: dict = Field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+
 class ExecutionPlan(BaseModel):
     provider: str
     spec: ExecutionSpec
@@ -146,6 +170,10 @@ class RunStatus(BaseModel):
     queued_at: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
+    # Human-readable note about *why* a run sits in its current state -- a
+    # scheduler job can be queued because the cluster is busy or because it can
+    # never be scheduled as configured, and those need different reactions.
+    detail: str = ""
 
 
 class LogPage(BaseModel):
@@ -156,6 +184,7 @@ class LogPage(BaseModel):
 
 class ComputeProvider(Protocol):
     def capabilities(self) -> ProviderCapabilities: ...
+    def check(self) -> ProviderCheck: ...
     def validate(self, spec: ExecutionSpec) -> ExecutionPlan: ...
     def submit(self, plan: ExecutionPlan) -> RunReference: ...
     def status(self, run: RunReference) -> RunStatus: ...

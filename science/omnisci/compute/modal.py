@@ -23,6 +23,7 @@ from omnisci.compute.base import (
     ExecutionSpec,
     LogPage,
     ProviderCapabilities,
+    ProviderCheck,
     RunReference,
     RunStatus,
 )
@@ -88,6 +89,42 @@ class ModalComputeProvider:
                     "filesystem_staging": True,
                 }
             },
+        )
+
+    def check(self) -> ProviderCheck:
+        """Confirm the optional SDK is installed and its credentials resolve."""
+        try:
+            modal = self._modal()
+        except StateError as exc:
+            return ProviderCheck(
+                provider=self.name,
+                status="missing_dependency",
+                detail=str(exc),
+                remedy="Install the optional dependency: pip install 'omnigent[modal]'.",
+                checked_at=utcnow(),
+            )
+        try:
+            modal.App.lookup(
+                str(self.config.get("app_name", "omnigent-science")), create_if_missing=True
+            )
+        # A health check exists to *report* failure rather than propagate it, and
+        # the SDK raises its own exception hierarchy for auth, network, and
+        # gateway errors. The type and message are surfaced in `detail`, so this
+        # converts an opaque crash into a diagnosis -- it never swallows one.
+        except Exception as exc:  # noqa: BLE001
+            return ProviderCheck(
+                provider=self.name,
+                status="auth_failed",
+                detail=f"{type(exc).__name__}: {exc}",
+                remedy="Run `modal token new` to authenticate this machine.",
+                checked_at=utcnow(),
+            )
+        return ProviderCheck(
+            provider=self.name,
+            status="ok",
+            detail="Modal SDK authenticated",
+            checked_at=utcnow(),
+            observed={"app_name": self.config.get("app_name", "omnigent-science")},
         )
 
     def validate(self, spec: ExecutionSpec) -> ExecutionPlan:

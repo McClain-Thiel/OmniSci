@@ -32,6 +32,8 @@ release pin merge tractable. If your change can live in `science/` or
 - **[`docs/OMNISCI_AUDIT.md`](docs/OMNISCI_AUDIT.md)** is the real backlog. Every
   item carries `file:line` evidence and a priority. GitHub issues are views onto
   that document; when the two disagree, the document wins.
+- **[`docs/HPC.md`](docs/HPC.md)** covers cluster setup — SSH, schedulers, and the
+  shared-filesystem requirement.
 - **[`docs/OMNISCI_PRD.md`](docs/OMNISCI_PRD.md)** is the standard to build
   against — in particular the compute **connector contract**, which is what a new
   compute backend has to satisfy.

@@ -26,6 +26,7 @@ from omnisci.compute.base import (
     ExecutionPlan,
     ExecutionSpec,
     ProviderCapabilities,
+    ProviderCheck,
     RunReference,
 )
 from omnisci.compute.local import DEFAULT_TIMEOUT_MINUTES, LocalComputeProvider
@@ -913,6 +914,30 @@ class ScienceService:
         return [
             self.compute_providers[name].capabilities() for name in sorted(self.compute_providers)
         ]
+
+    def check_compute(self, provider_name: str | None = None) -> list[ProviderCheck]:
+        """Probe configured compute connectors and report why any are unusable.
+
+        Static configuration cannot tell you a key was rejected, a VPN is down,
+        or a login node runs no scheduler -- until now those only appeared as a
+        failed job submission.
+        """
+        names = [provider_name] if provider_name else sorted(self.compute_providers)
+        results = []
+        for name in names:
+            provider = self._compute_for(name)
+            check = getattr(provider, "check", None)
+            if check is None:
+                results.append(
+                    ProviderCheck(
+                        provider=name,
+                        status="ok",
+                        detail="provider does not implement a health check",
+                    )
+                )
+                continue
+            results.append(check())
+        return results
 
     def _compute_for(self, provider_name: str):
         provider = self.compute_providers.get(provider_name)
